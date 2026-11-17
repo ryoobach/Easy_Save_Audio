@@ -58,9 +58,11 @@ class App:
         self.root.configure(bg="#f5f5f5")
         f=tk.Frame(self.root,bg="#f5f5f5",padx=24,pady=20); f.pack(fill="both",expand=True)
 
-        # 앱 아이콘과 영문 앱 이름을 한 줄에 배치
+        # 실행 파일 아이콘과 동일한 원본 PNG를 창 헤더에도 사용
         head=tk.Frame(f,bg="#f5f5f5"); head.pack(fill="x",anchor="w",pady=(0,15))
-        tk.Label(head,text="♫",font=("Segoe UI Symbol",27,"bold"),fg="white",bg="#c91d2e",width=2,height=1).pack(side="left",padx=(0,12))
+        icon_path=Path(getattr(sys,"_MEIPASS",Path(__file__).resolve().parent))/"easy_save_audio.png"
+        self.header_icon=tk.PhotoImage(file=str(icon_path))
+        tk.Label(head,image=self.header_icon,bg="#f5f5f5").pack(side="left",padx=(0,12))
         titlebox=tk.Frame(head,bg="#f5f5f5"); titlebox.pack(side="left",fill="y")
         tk.Label(titlebox,text=APP,font=("Segoe UI",19,"bold"),fg="#c91d2e",bg="#f5f5f5").pack(anchor="w")
         tk.Label(titlebox,text="Ryoo jaesang & 최피디",font=("Malgun Gothic",9),fg="#666",bg="#f5f5f5").pack(anchor="w")
@@ -103,10 +105,9 @@ class App:
             info=probe.stderr or ""
             # FFmpeg 출력 문구에 의존해 주소를 미리 거부하지 않습니다.
             # 실제 변환 단계에서 확인하고, 실패하면 구체적인 오류를 표시합니다.
+            m=re.search(r"\\btitle\\s*:\\s*(.+)$",info,re.I|re.M)
             fallback=Path(urllib.parse.unquote(urllib.parse.urlparse(u).path)).stem
             title=safe_name(m.group(1).strip() if m else (fallback or "audio"))
-            m=re.search(r"\btitle\s*:\s*(.+)$",info,re.I|re.M)
-            title=safe_name(m.group(1).strip() if m else Path(urllib.parse.unquote(urllib.parse.urlparse(u).path)).stem)
             self.events.put(("choose",title,u))
         except Exception as e:self.events.put(("error",str(e),u))
 
