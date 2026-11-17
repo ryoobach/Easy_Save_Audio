@@ -7,7 +7,7 @@ from tkinter import ttk, filedialog, messagebox
 import imageio_ffmpeg
 
 APP="Easy Save Audio"
-VERSION="1.1.0"
+VERSION="1.2.0"
 APPDATA=Path(os.environ.get("APPDATA", str(Path.home()))) / "EasySaveAudio"
 APPDATA.mkdir(parents=True, exist_ok=True)
 SETTINGS=APPDATA/"settings.json"
@@ -56,7 +56,7 @@ class App:
         self.root.geometry("680x390")
         self.root.minsize(610,360)
         self.settings=load_settings(); self.events=queue.Queue(); self.busy=False; self.ffmpeg=ffmpeg_binary()
-        self.url=tk.StringVar(value=self.settings.get("last_url","")); self.status=tk.StringVar(value="대기 중")
+        self.url=tk.StringVar(value=self.settings.get("last_url","")); self.status=tk.StringVar(value="대기 중"); self.percent=tk.StringVar(value="--%")
         self.build(); self.root.after(100,self.poll)
 
     def paste_url(self):
@@ -105,8 +105,11 @@ class App:
         self.go=ttk.Button(row,text="확인 · MP3 만들기",command=self.start); self.go.pack(side="left")
         ttk.Button(row,text="작업 기록",command=self.history).pack(side="left",padx=8)
         tk.Label(row,text="MP3  |  320 kbps  |  음량 자동 보정",bg="#f5f5f5").pack(side="right")
-        tk.Label(f,textvariable=self.status,bg="#f5f5f5").pack(anchor="w",pady=(22,6))
-        self.progress=ttk.Progressbar(f,maximum=100); self.progress.pack(fill="x")
+        statusrow=tk.Frame(f,bg="#f5f5f5"); statusrow.pack(fill="x",pady=(22,6))
+        tk.Label(statusrow,textvariable=self.status,bg="#f5f5f5").pack(side="left",anchor="w")
+        progressrow=tk.Frame(f,bg="#f5f5f5"); progressrow.pack(fill="x")
+        self.progress=ttk.Progressbar(progressrow,maximum=100); self.progress.pack(side="left",fill="x",expand=True)
+        tk.Label(progressrow,textvariable=self.percent,bg="#f5f5f5",width=6,anchor="e",font=("Segoe UI",10,"bold")).pack(side="right",padx=(10,0))
         tk.Label(f,text="지원 사이트의 공개 영상 및 다운로드가 허용된 콘텐츠를 처리합니다. DRM·접근 제한 콘텐츠는 지원하지 않습니다.",fg="#666",bg="#f5f5f5",wraplength=620,justify="left").pack(anchor="w",pady=(12,0))
 
     def start(self):
@@ -115,7 +118,7 @@ class App:
         if p.scheme not in ("http","https") or not p.netloc:
             messagebox.showwarning("주소 확인","http:// 또는 https://로 시작하는 동영상 주소를 입력해 주세요."); return
         self.busy=True; self.go.configure(state="disabled"); self.entry.configure(state="disabled")
-        self.settings["last_url"]=u; save_settings(self.settings); self.status.set("영상 정보를 확인하고 있습니다…"); self.progress.configure(mode="indeterminate"); self.progress.start(10)
+        self.settings["last_url"]=u; save_settings(self.settings); self.status.set("영상 정보를 확인하고 있습니다…"); self.percent.set("--%"); self.progress.configure(mode="indeterminate"); self.progress.start(10)
         threading.Thread(target=self.worker,args=(u,),daemon=True).start()
 
     def worker(self,u):
@@ -142,7 +145,7 @@ class App:
             while True:
                 e=self.events.get_nowait()
                 if e[0]=="choose":
-                    _,title,source,u,temp_dir=e; self.progress.stop(); self.progress.configure(mode="determinate",value=0)
+                    _,title,source,u,temp_dir=e; self.progress.stop(); self.progress.configure(mode="determinate",value=0); self.percent.set("--%")
                     folder=Path(self.settings.get("last_save_dir",str(Path.home()/"Music")))
                     if not folder.exists():folder=Path.home()
                     out=filedialog.asksaveasfilename(parent=self.root,title="MP3 파일 저장",initialdir=str(folder),initialfile=title+".mp3",defaultextension=".mp3",filetypes=[("MP3 오디오","*.mp3")])
@@ -150,10 +153,18 @@ class App:
                         if temp_dir: shutil.rmtree(temp_dir,ignore_errors=True)
                         self.finish("저장이 취소되었습니다."); self.record(u,"취소",""); continue
                     self.settings["last_save_dir"]=str(Path(out).resolve().parent); save_settings(self.settings)
-                    self.status.set("음성 데이터를 가져오고 있습니다…"); self.progress.configure(mode="indeterminate"); self.progress.start(10)
+                    self.status.set("음성 데이터 다운로드 중…"); self.progress.stop(); self.progress.configure(mode="determinate",value=0); self.percent.set("--%")
                     threading.Thread(target=self.download_encode,args=(u,out),daemon=True).start()
                 elif e[0]=="status":
                     self.status.set(e[1])
+                elif e[0]=="progress":
+                    _,pct,label=e
+                    pct=max(0,min(100,int(pct)))
+                    self.progress.stop(); self.progress.configure(mode="determinate",value=pct)
+                    self.percent.set(f"{pct}%"); self.status.set(label)
+                elif e[0]=="progress_unknown":
+                    self.progress.stop(); self.progress.configure(mode="determinate",value=0)
+                    self.percent.set("--%"); self.status.set(e[1])
                 elif e[0]=="done":
                     _,u,out=e; self.finish("추출 및 저장이 완료되었습니다."); self.record(u,"성공",out)
                     if messagebox.askyesno("추출 성공",f"MP3 저장 완료\\n\\n{out}\\n\\n저장 폴더를 여시겠습니까?"): os.startfile(str(Path(out).parent))
@@ -174,10 +185,12 @@ class App:
                         total=data.get("total_bytes") or data.get("total_bytes_estimate")
                         done=data.get("downloaded_bytes",0)
                         if total:
-                            pct=max(0,min(100,int(done*100/total)))
-                            self.events.put(("status",f"음성 데이터 다운로드 중… {pct}%"))
+                            pct=max(0,min(99,int(done*100/total)))
+                            self.events.put(("progress",pct,"음성 데이터 다운로드 중…"))
+                        else:
+                            self.events.put(("progress_unknown","음성 데이터 다운로드 중… (진행률 확인 중)"))
                     elif data.get("status")=="finished":
-                        self.events.put(("status","음성 데이터 수신 완료 · MP3 변환 중…"))
+                        self.events.put(("progress",100,"음성 데이터 수신 완료 · MP3 변환 준비 중…"))
                 opts={"format":"bestaudio/best","outtmpl":template,"quiet":True,"no_warnings":True,
                       "noplaylist":True,"progress_hooks":[hook],"retries":3,"fragment_retries":3}
                 with yt_dlp.YoutubeDL(opts) as ydl:
@@ -192,32 +205,88 @@ class App:
                     files=[p for p in Path(temp).iterdir() if p.is_file()]
                     source=files[0] if files else None
                 if source is None: raise RuntimeError("다운로드된 미디어 파일을 찾을 수 없습니다.")
-                self.events.put(("status","MP3 320kbps · 음량 자동 보정 중…"))
+                self.events.put(("progress",0,"MP3 320kbps · 음량 자동 보정 중…"))
                 # 원본 샘플레이트를 유지하고 음악의 통합 음량을 -14 LUFS,
                 # 최대 트루 피크를 -1 dBTP로 맞춰 곡별 체감 음량 차이를 줄입니다.
+                duration=info.get("duration") if isinstance(info,dict) else None
                 cmd=[self.ffmpeg,"-y","-hide_banner","-loglevel","error","-i",str(source),
                      "-vn","-af","loudnorm=I=-14:TP=-1.0:LRA=11",
-                     "-codec:a","libmp3lame","-b:a","320k",out]
-                p=subprocess.run(cmd,capture_output=True,text=True,encoding="utf-8",errors="replace",timeout=7200,creationflags=getattr(subprocess,"CREATE_NO_WINDOW",0))
-                if p.returncode or not Path(out).exists() or Path(out).stat().st_size==0:
-                    raise RuntimeError(p.stderr or "오디오 인코딩 오류")
+                     "-codec:a","libmp3lame","-b:a","320k","-progress","pipe:1","-nostats",out]
+                proc=subprocess.Popen(cmd,stdout=subprocess.PIPE,stderr=subprocess.PIPE,text=True,
+                                      encoding="utf-8",errors="replace",
+                                      creationflags=getattr(subprocess,"CREATE_NO_WINDOW",0))
+                for line in proc.stdout:
+                    line=line.strip()
+                    if line.startswith("out_time_ms=") or line.startswith("out_time_us="):
+                        try:
+                            seconds=int(line.split("=",1)[1])/1000000.0
+                            if duration and float(duration)>0:
+                                pct=max(0,min(99,int(seconds*100/float(duration))))
+                                self.events.put(("progress",pct,"MP3 변환 및 음량 보정 중…"))
+                            else:
+                                self.events.put(("progress_unknown","MP3 변환 및 음량 보정 중…"))
+                        except (ValueError,TypeError):
+                            pass
+                stderr=proc.stderr.read()
+                returncode=proc.wait(timeout=7200)
+                if returncode or not Path(out).exists() or Path(out).stat().st_size==0:
+                    raise RuntimeError(stderr or "오디오 인코딩 오류")
             self.events.put(("done",u,out))
         except Exception as e:
             self.events.put(("error",str(e),u))
 
     def finish(self,msg):
-        self.busy=False; self.progress.stop(); self.progress.configure(mode="determinate",value=100 if "완료" in msg else 0); self.go.configure(state="normal"); self.entry.configure(state="normal"); self.status.set(msg)
+        self.busy=False; self.progress.stop(); self.progress.configure(mode="determinate",value=100 if "완료" in msg else 0); self.percent.set("100%" if "완료" in msg else "--%"); self.go.configure(state="normal"); self.entry.configure(state="normal"); self.status.set(msg)
 
     def record(self,u,result,detail):
         h=self.settings.get("history",[]); h.insert(0,{"time":datetime.now().astimezone().strftime("%Y-%m-%d %H:%M:%S"),"url":u,"result":result,"detail":detail})
         self.settings["history"]=h[:200]; save_settings(self.settings)
 
     def history(self):
-        w=tk.Toplevel(self.root); w.title("작업 기록"); w.geometry("780x380")
-        t=ttk.Treeview(w,columns=("time","result","detail"),show="headings"); t.heading("time",text="작업 시각"); t.heading("result",text="결과"); t.heading("detail",text="저장 파일 / 오류")
-        t.column("time",width=150); t.column("result",width=70); t.column("detail",width=520); t.pack(fill="both",expand=True,padx=10,pady=10)
-        for x in self.settings.get("history",[]):t.insert("","end",values=(x.get("time",""),x.get("result",""),x.get("detail","")))
-        if not self.settings.get("history"):t.insert("","end",values=("","","기록이 없습니다."))
+        w=tk.Toplevel(self.root); w.title("작업 기록"); w.geometry("800x420")
+        t=ttk.Treeview(w,columns=("time","result","detail"),show="headings",selectmode="browse")
+        t.heading("time",text="작업 시각"); t.heading("result",text="결과"); t.heading("detail",text="저장 파일 / 오류")
+        t.column("time",width=155); t.column("result",width=75); t.column("detail",width=530)
+        t.pack(fill="both",expand=True,padx=10,pady=(10,6))
+
+        def redraw():
+            for item in t.get_children(): t.delete(item)
+            history=self.settings.get("history",[])
+            for idx,x in enumerate(history):
+                t.insert("","end",iid=str(idx),values=(x.get("time",""),x.get("result",""),x.get("detail","")))
+            if not history:
+                t.insert("","end",iid="empty",values=("","","기록이 없습니다."))
+
+        def delete_selected():
+            selected=t.selection()
+            if not selected or selected[0]=="empty":
+                messagebox.showinfo("기록 삭제","삭제할 작업 기록을 먼저 선택해 주세요.",parent=w)
+                return
+            idx=int(selected[0])
+            history=self.settings.get("history",[])
+            if idx<0 or idx>=len(history): return
+            if not messagebox.askyesno("기록 삭제","선택한 작업 기록을 삭제하시겠습니까?\n\n실제 MP3 파일은 삭제되지 않습니다.",parent=w):
+                return
+            history.pop(idx)
+            self.settings["history"]=history
+            save_settings(self.settings)
+            redraw()
+
+        def delete_all():
+            if not self.settings.get("history"):
+                messagebox.showinfo("전체 기록 삭제","삭제할 작업 기록이 없습니다.",parent=w)
+                return
+            if not messagebox.askyesno("전체 기록 삭제","모든 작업 기록을 삭제하시겠습니까?\n\n작업 기록만 삭제되며 실제 MP3 파일은 삭제되지 않습니다.",parent=w):
+                return
+            self.settings["history"]=[]
+            save_settings(self.settings)
+            redraw()
+
+        buttons=tk.Frame(w); buttons.pack(fill="x",padx=10,pady=(0,10))
+        ttk.Button(buttons,text="선택 기록 삭제",command=delete_selected).pack(side="left")
+        ttk.Button(buttons,text="전체 기록 삭제",command=delete_all).pack(side="left",padx=(8,0))
+        ttk.Button(buttons,text="닫기",command=w.destroy).pack(side="right")
+        redraw()
 
 if __name__=="__main__":
     root=tk.Tk()
