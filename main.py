@@ -217,20 +217,4 @@ class App:
 
 if __name__=="__main__":
     root=tk.Tk()
-    App(root); root.mainloop(    def finish(self,msg):
-        self.busy=False; self.progress.stop(); self.progress.configure(mode="determinate",value=100 if "완료" in msg else 0); self.go.configure(state="normal"); self.entry.configure(state="normal"); self.status.set(msg)
-
-    def record(self,u,result,detail):
-        h=self.settings.get("history",[]); h.insert(0,{"time":datetime.now().astimezone().strftime("%Y-%m-%d %H:%M:%S"),"url":u,"result":result,"detail":detail})
-        self.settings["history"]=h[:200]; save_settings(self.settings)
-
-    def history(self):
-        w=tk.Toplevel(self.root); w.title("작업 기록"); w.geometry("780x380")
-        t=ttk.Treeview(w,columns=("time","result","detail"),show="headings"); t.heading("time",text="작업 시각"); t.heading("result",text="결과"); t.heading("detail",text="저장 파일 / 오류")
-        t.column("time",width=150); t.column("result",width=70); t.column("detail",width=520); t.pack(fill="both",expand=True,padx=10,pady=10)
-        for x in self.settings.get("history",[]):t.insert("","end",values=(x.get("time",""),x.get("result",""),x.get("detail","")))
-        if not self.settings.get("history"):t.insert("","end",values=("","","기록이 없습니다."))
-
-if __name__=="__main__":
-    root=tk.Tk()
     App(root); root.mainloop()
