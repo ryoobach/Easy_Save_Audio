@@ -20,7 +20,7 @@ jobs:
         shell: pwsh
         run: |
           $ffmpeg = python -c "import imageio_ffmpeg; print(imageio_ffmpeg.get_ffmpeg_exe())"
-          python -m PyInstaller --noconfirm --clean --onefile --windowed --name EasySaveAudio --icon easy_save_audio.ico --add-binary "$ffmpeg;." main.py
+          python -m PyInstaller --noconfirm --clean --onefile --windowed --name EasySaveAudio --icon easy_save_audio.ico --add-data "easy_save_audio.png;." --add-binary "$ffmpeg;." main.py
       - name: Upload portable EXE
         uses: actions/upload-artifact@v4
         with:
