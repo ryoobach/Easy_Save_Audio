@@ -6,7 +6,7 @@ from tkinter import ttk, filedialog, messagebox
 import imageio_ffmpeg
 
 APP="이지 세이브 오디오"
-VERSION="1.0.1"
+VERSION="1.0.2"
 APPDATA=Path(os.environ.get("APPDATA", str(Path.home()))) / "EasySaveAudio"
 APPDATA.mkdir(parents=True, exist_ok=True)
 SETTINGS=APPDATA/"settings.json"
@@ -45,8 +45,10 @@ class App:
 
     def paste_url(self):
         try:
-            value=self.root.clipboard_get()
-            self.url.set(value.strip())
+            value=self.root.clipboard_get().strip()
+            # 기존 입력 내용을 먼저 완전히 지운 뒤 클립보드 주소로 교체
+            self.entry.delete(0, tk.END)
+            self.entry.insert(0, value)
             self.entry.focus_set()
             self.entry.icursor(tk.END)
         except tk.TclError:
@@ -72,9 +74,9 @@ class App:
                             highlightthickness=1,highlightbackground="#b8b8b8",highlightcolor="#c91d2e")
         self.entry.pack(side="left",fill="x",expand=True,ipady=7)
         self.entry.bind("<Button-1>",lambda e:self.entry.focus_set())
-        self.entry.bind("<Control-v>",lambda e:self.paste_url())
-        self.entry.bind("<Control-V>",lambda e:self.paste_url())
-        self.entry.bind("<Shift-Insert>",lambda e:self.paste_url())
+        self.entry.bind("<Control-v>",lambda e:(self.paste_url(),"break")[1])
+        self.entry.bind("<Control-V>",lambda e:(self.paste_url(),"break")[1])
+        self.entry.bind("<Shift-Insert>",lambda e:(self.paste_url(),"break")[1])
         self.entry.bind("<Return>",lambda e:self.start())
         ttk.Button(urlrow,text="붙여넣기",command=self.paste_url).pack(side="left",padx=(8,0),ipady=3)
 
