@@ -7,7 +7,7 @@ from tkinter import ttk, filedialog, messagebox
 import imageio_ffmpeg
 
 APP="Easy Save Audio"
-VERSION="1.0.8"
+VERSION="1.0.9"
 APPDATA=Path(os.environ.get("APPDATA", str(Path.home()))) / "EasySaveAudio"
 APPDATA.mkdir(parents=True, exist_ok=True)
 SETTINGS=APPDATA/"settings.json"
