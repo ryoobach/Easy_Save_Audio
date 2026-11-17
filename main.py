@@ -6,7 +6,7 @@ from tkinter import ttk, filedialog, messagebox
 import imageio_ffmpeg
 
 APP="Easy Save Audio"
-VERSION="1.0.4"
+VERSION="1.0.5"
 APPDATA=Path(os.environ.get("APPDATA", str(Path.home()))) / "EasySaveAudio"
 APPDATA.mkdir(parents=True, exist_ok=True)
 SETTINGS=APPDATA/"settings.json"
@@ -61,7 +61,7 @@ class App:
         # 실행 파일 아이콘과 동일한 원본 PNG를 창 헤더에도 사용
         head=tk.Frame(f,bg="#f5f5f5"); head.pack(fill="x",anchor="w",pady=(0,15))
         icon_path=Path(getattr(sys,"_MEIPASS",Path(__file__).resolve().parent))/"easy_save_audio.png"
-        self.header_icon=tk.PhotoImage(file=str(icon_path))
+        self.header_icon=tk.PhotoImage(file=str(icon_path)).subsample(6,6)
         tk.Label(head,image=self.header_icon,bg="#f5f5f5").pack(side="left",padx=(0,12))
         titlebox=tk.Frame(head,bg="#f5f5f5"); titlebox.pack(side="left",fill="y")
         tk.Label(titlebox,text=APP,font=("Segoe UI",19,"bold"),fg="#c91d2e",bg="#f5f5f5").pack(anchor="w")
@@ -95,6 +95,8 @@ class App:
         u=self.url.get().strip(); p=urllib.parse.urlparse(u)
         if p.scheme not in ("http","https") or not p.netloc:
             messagebox.showwarning("주소 확인","http:// 또는 https://로 시작하는 직접 미디어 주소를 입력해 주세요."); return
+        if p.netloc.lower().endswith(("youtube.com","youtu.be")) or p.netloc.lower().endswith("youtube-nocookie.com"):
+            messagebox.showinfo("주소 형식 안내","유튜브 동영상 페이지 주소는 직접 미디어 파일 주소가 아닙니다. 이 프로그램은 유튜브의 보호된 스트림을 추출하지 않으며, 다운로드 권한이 있는 직접 미디어 파일 주소를 지원합니다."); return
         self.busy=True; self.go.configure(state="disabled"); self.entry.configure(state="disabled")
         self.settings["last_url"]=u; save_settings(self.settings); self.status.set("영상 정보를 확인하고 있습니다…"); self.progress.configure(mode="indeterminate"); self.progress.start(10)
         threading.Thread(target=self.worker,args=(u,),daemon=True).start()
