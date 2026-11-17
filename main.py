@@ -6,7 +6,7 @@ from tkinter import ttk, filedialog, messagebox
 import imageio_ffmpeg
 
 APP="Easy Save Audio"
-VERSION="1.0.3"
+VERSION="1.0.4"
 APPDATA=Path(os.environ.get("APPDATA", str(Path.home()))) / "EasySaveAudio"
 APPDATA.mkdir(parents=True, exist_ok=True)
 SETTINGS=APPDATA/"settings.json"
@@ -101,7 +101,10 @@ class App:
         try:
             probe=subprocess.run([self.ffmpeg,"-hide_banner","-i",u],capture_output=True,text=True,encoding="utf-8",errors="replace",timeout=45)
             info=probe.stderr or ""
-            if "Input #0" not in info and "Stream #0" not in info: raise RuntimeError("주소에 접근할 수 없거나 지원하지 않는 미디어 형식입니다. 직접 다운로드 주소인지 확인해 주세요.")
+            # FFmpeg 출력 문구에 의존해 주소를 미리 거부하지 않습니다.
+            # 실제 변환 단계에서 확인하고, 실패하면 구체적인 오류를 표시합니다.
+            fallback=Path(urllib.parse.unquote(urllib.parse.urlparse(u).path)).stem
+            title=safe_name(m.group(1).strip() if m else (fallback or "audio"))
             m=re.search(r"\btitle\s*:\s*(.+)$",info,re.I|re.M)
             title=safe_name(m.group(1).strip() if m else Path(urllib.parse.unquote(urllib.parse.urlparse(u).path)).stem)
             self.events.put(("choose",title,u))
