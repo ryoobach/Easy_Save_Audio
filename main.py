@@ -5,6 +5,9 @@ from datetime import datetime
 import tkinter as tk
 from tkinter import ttk, filedialog, messagebox
 import imageio_ffmpeg
+import tempfile
+import shutil
+import yt_dlp
 
 APP="Easy Save Audio"
 VERSION="1.0.8"
@@ -119,13 +122,30 @@ class App:
         threading.Thread(target=self.worker,args=(u,),daemon=True).start()
 
     def worker(self,u):
+        temp_dir=None
         try:
-            opts={"quiet":True,"no_warnings":True,"noplaylist":True,"skip_download":True}
-            with yt_dlp.YoutubeDL(opts) as ydl:
-                info=ydl.extract_info(u,download=False)
-            title=safe_name(info.get("title") or Path(urllib.parse.unquote(urllib.parse.urlparse(u).path)).stem or "audio")
-            self.events.put(("choose",title,u))
+            host=urllib.parse.urlparse(u).netloc.lower()
+            is_youtube=(host=="youtu.be" or host.endswith(".youtube.com") or host=="youtube.com" or host.endswith(".youtube-nocookie.com"))
+            if is_youtube:
+                # 공개적으로 접근 가능하고 사용자가 다운로드 권한을 가진 영상만 처리합니다.
+                temp_dir=tempfile.mkdtemp(prefix="easy_save_audio_")
+                opts={"format":"bestaudio/best","outtmpl":str(Path(temp_dir)/"source.%(ext)s"),
+                      "noplaylist":True,"quiet":True,"no_warnings":True,"restrictfilenames":True}
+                with yt_dlp.YoutubeDL(opts) as ydl:
+                    info=ydl.extract_info(u,download=True)
+                    title=safe_name(info.get("title") or "audio")
+                candidates=[p for p in Path(temp_dir).iterdir() if p.is_file()]
+                if not candidates: raise RuntimeError("다운로드된 오디오 파일을 찾지 못했습니다.")
+                self.events.put(("choose",title,str(candidates[0]),u,temp_dir))
+                return
+            probe=subprocess.run([self.ffmpeg,"-hide_banner","-i",u],capture_output=True,text=True,encoding="utf-8",errors="replace",timeout=45)
+            info=probe.stderr or ""
+            m=re.search(r"\\btitle\\s*:\\s*(.+)$",info,re.I|re.M)
+            fallback=Path(urllib.parse.unquote(urllib.parse.urlparse(u).path)).stem
+            title=safe_name(m.group(1).strip() if m else (fallback or "audio"))
+            self.events.put(("choose",title,u,u,None))
         except Exception as e:
+            if temp_dir: shutil.rmtree(temp_dir,ignore_errors=True)
             self.events.put(("error",str(e),u))
 
     def poll(self):
@@ -133,11 +153,13 @@ class App:
             while True:
                 e=self.events.get_nowait()
                 if e[0]=="choose":
-                    _,title,u=e; self.progress.stop(); self.progress.configure(mode="determinate",value=0)
+                    _,title,source,u,temp_dir=e; self.progress.stop(); self.progress.configure(mode="determinate",value=0)
                     folder=Path(self.settings.get("last_save_dir",str(Path.home()/"Music")))
                     if not folder.exists():folder=Path.home()
                     out=filedialog.asksaveasfilename(parent=self.root,title="MP3 파일 저장",initialdir=str(folder),initialfile=title+".mp3",defaultextension=".mp3",filetypes=[("MP3 오디오","*.mp3")])
-                    if not out:self.finish("저장이 취소되었습니다."); self.record(u,"취소",""); continue
+                    if not out:
+                        if temp_dir: shutil.rmtree(temp_dir,ignore_errors=True)
+                        self.finish("저장이 취소되었습니다."); self.record(u,"취소",""); continue
                     self.settings["last_save_dir"]=str(Path(out).resolve().parent); save_settings(self.settings)
                     self.status.set("음성 데이터를 가져오고 있습니다…"); self.progress.configure(mode="indeterminate"); self.progress.start(10)
                     threading.Thread(target=self.download_encode,args=(u,out),daemon=True).start()
@@ -191,6 +213,22 @@ class App:
             self.events.put(("error",str(e),u))
 
     def finish(self,msg):
+        self.busy=False; self.progress.stop(); self.progress.configure(mode="determinate",value=100 if "완료" in msg else 0); self.go.configure(state="normal"); self.entry.configure(state="normal"); self.status.set(msg)
+
+    def record(self,u,result,detail):
+        h=self.settings.get("history",[]); h.insert(0,{"time":datetime.now().astimezone().strftime("%Y-%m-%d %H:%M:%S"),"url":u,"result":result,"detail":detail})
+        self.settings["history"]=h[:200]; save_settings(self.settings)
+
+    def history(self):
+        w=tk.Toplevel(self.root); w.title("작업 기록"); w.geometry("780x380")
+        t=ttk.Treeview(w,columns=("time","result","detail"),show="headings"); t.heading("time",text="작업 시각"); t.heading("result",text="결과"); t.heading("detail",text="저장 파일 / 오류")
+        t.column("time",width=150); t.column("result",width=70); t.column("detail",width=520); t.pack(fill="both",expand=True,padx=10,pady=10)
+        for x in self.settings.get("history",[]):t.insert("","end",values=(x.get("time",""),x.get("result",""),x.get("detail","")))
+        if not self.settings.get("history"):t.insert("","end",values=("","","기록이 없습니다."))
+
+if __name__=="__main__":
+    root=tk.Tk()
+    App(root); root.mainloop(    def finish(self,msg):
         self.busy=False; self.progress.stop(); self.progress.configure(mode="determinate",value=100 if "완료" in msg else 0); self.go.configure(state="normal"); self.entry.configure(state="normal"); self.status.set(msg)
 
     def record(self,u,result,detail):
