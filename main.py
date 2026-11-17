@@ -107,7 +107,7 @@ class App:
             info=probe.stderr or ""
             # FFmpeg 출력 문구에 의존해 주소를 미리 거부하지 않습니다.
             # 실제 변환 단계에서 확인하고, 실패하면 구체적인 오류를 표시합니다.
-            m=re.search(r"\\btitle\\s*:\\s*(.+)$",info,re.I|re.M)
+            m=re.search(r"\btitle\s*:\s*(.+)$",info,re.I|re.M)
             fallback=Path(urllib.parse.unquote(urllib.parse.urlparse(u).path)).stem
             title=safe_name(m.group(1).strip() if m else (fallback or "audio"))
             self.events.put(("choose",title,u))
