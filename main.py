@@ -1,4 +1,5 @@
-import json, os, re, subprocess, threading, queue, urllib.parse, sys
+import json, os, re, subprocess, threading, queue, urllib.parse, sys, tempfile
+import yt_dlp
 from pathlib import Path
 from datetime import datetime
 import tkinter as tk
@@ -6,7 +7,7 @@ from tkinter import ttk, filedialog, messagebox
 import imageio_ffmpeg
 
 APP="Easy Save Audio"
-VERSION="1.0.7"
+VERSION="1.0.8"
 APPDATA=Path(os.environ.get("APPDATA", str(Path.home()))) / "EasySaveAudio"
 APPDATA.mkdir(parents=True, exist_ok=True)
 SETTINGS=APPDATA/"settings.json"
@@ -42,8 +43,11 @@ def korean_error(message):
     if "could not resolve" in s or "no such host" in s or "name or service not known" in s: return "주소의 서버를 찾을 수 없습니다. 인터넷 연결과 주소를 확인해 주세요."
     if "invalid data found" in s or "does not contain any stream" in s or "unknown format" in s: return "지원하는 미디어 파일을 확인하지 못했습니다. 웹페이지 주소가 아닌 직접 미디어 파일 주소를 입력해 주세요."
     if "connection refused" in s or "network is unreachable" in s or "connection reset" in s: return "서버에 연결하지 못했습니다. 네트워크 상태나 서버의 접근 제한을 확인해 주세요."
+    if "unsupported url" in s or "no suitable extractor" in s: return "이 사이트의 주소 형식을 지원하지 않거나 동영상 정보를 확인할 수 없습니다."
+    if "private video" in s or "sign in" in s or "login required" in s: return "비공개 또는 로그인이 필요한 영상입니다. 공개적으로 접근 가능하고 다운로드가 허용된 주소인지 확인해 주세요."
+    if "drm" in s or "protected" in s: return "DRM 등 보호된 콘텐츠는 추출할 수 없습니다."
     if "no space left" in s: return "저장 공간이 부족합니다. 저장 드라이브의 여유 공간을 확보해 주세요."
-    return "미디어를 가져오거나 MP3로 변환하지 못했습니다. 직접 미디어 파일 주소인지, 다운로드 권한이 있는지 확인해 주세요."
+    return "동영상 정보를 가져오거나 음성을 MP3로 변환하지 못했습니다. 주소와 해당 사이트의 다운로드 권한을 확인해 주세요."
 
 class App:
     def __init__(self,root):
@@ -82,8 +86,8 @@ class App:
         tk.Label(titlebox,text=APP,font=("Segoe UI",19,"bold"),fg="#c91d2e",bg="#f5f5f5").pack(anchor="w")
         tk.Label(titlebox,text="Ryoo jaesang & 최피디",font=("Malgun Gothic",9),fg="#666",bg="#f5f5f5").pack(anchor="w")
 
-        tk.Label(f,text="영상 주소를 입력하면 재생 없이 MP3로 추출합니다.",bg="#f5f5f5",font=("Malgun Gothic",10)).pack(anchor="w",pady=(0,14))
-        tk.Label(f,text="영상 직접 다운로드 주소",bg="#f5f5f5").pack(anchor="w")
+        tk.Label(f,text="동영상 주소를 입력하면 재생 없이 음성만 MP3로 추출합니다.",bg="#f5f5f5",font=("Malgun Gothic",10)).pack(anchor="w",pady=(0,14))
+        tk.Label(f,text="동영상 페이지 또는 미디어 주소",bg="#f5f5f5").pack(anchor="w")
 
         # 일반 Tk Entry로 입력 포커스/마우스 동작을 명확히 하고 별도 붙여넣기 버튼 제공
         urlrow=tk.Frame(f,bg="#f5f5f5"); urlrow.pack(fill="x",pady=(5,12))
@@ -103,30 +107,26 @@ class App:
         tk.Label(row,text="MP3  |  192 kbps  |  48 kHz",bg="#f5f5f5").pack(side="right")
         tk.Label(f,textvariable=self.status,bg="#f5f5f5").pack(anchor="w",pady=(22,6))
         self.progress=ttk.Progressbar(f,maximum=100); self.progress.pack(fill="x")
-        tk.Label(f,text="다운로드·변환 권한이 있는 직접 미디어 주소만 지원합니다.",fg="#666",bg="#f5f5f5").pack(anchor="w",pady=(12,0))
+        tk.Label(f,text="지원 사이트의 공개 영상 및 다운로드가 허용된 콘텐츠를 처리합니다. DRM·접근 제한 콘텐츠는 지원하지 않습니다.",fg="#666",bg="#f5f5f5",wraplength=620,justify="left").pack(anchor="w",pady=(12,0))
 
     def start(self):
         if self.busy:return
         u=self.url.get().strip(); p=urllib.parse.urlparse(u)
         if p.scheme not in ("http","https") or not p.netloc:
-            messagebox.showwarning("주소 확인","http:// 또는 https://로 시작하는 직접 미디어 주소를 입력해 주세요."); return
-        if p.netloc.lower().endswith(("youtube.com","youtu.be")) or p.netloc.lower().endswith("youtube-nocookie.com"):
-            messagebox.showinfo("주소 형식 안내","유튜브 동영상 페이지 주소는 직접 미디어 파일 주소가 아닙니다. 이 프로그램은 유튜브의 보호된 스트림을 우회해 추출하지 않습니다. 본인 영상은 유튜브 스튜디오에서 다운로드한 뒤, 추후 추가할 파일 열기 기능으로 MP3 변환을 진행할 수 있습니다. 현재는 다운로드 권한이 있는 직접 미디어 파일 주소를 지원합니다."); return
+            messagebox.showwarning("주소 확인","http:// 또는 https://로 시작하는 동영상 주소를 입력해 주세요."); return
         self.busy=True; self.go.configure(state="disabled"); self.entry.configure(state="disabled")
         self.settings["last_url"]=u; save_settings(self.settings); self.status.set("영상 정보를 확인하고 있습니다…"); self.progress.configure(mode="indeterminate"); self.progress.start(10)
         threading.Thread(target=self.worker,args=(u,),daemon=True).start()
 
     def worker(self,u):
         try:
-            probe=subprocess.run([self.ffmpeg,"-hide_banner","-i",u],capture_output=True,text=True,encoding="utf-8",errors="replace",timeout=45)
-            info=probe.stderr or ""
-            # FFmpeg 출력 문구에 의존해 주소를 미리 거부하지 않습니다.
-            # 실제 변환 단계에서 확인하고, 실패하면 구체적인 오류를 표시합니다.
-            m=re.search(r"\btitle\s*:\s*(.+)$",info,re.I|re.M)
-            fallback=Path(urllib.parse.unquote(urllib.parse.urlparse(u).path)).stem
-            title=safe_name(m.group(1).strip() if m else (fallback or "audio"))
+            opts={"quiet":True,"no_warnings":True,"noplaylist":True,"skip_download":True}
+            with yt_dlp.YoutubeDL(opts) as ydl:
+                info=ydl.extract_info(u,download=False)
+            title=safe_name(info.get("title") or Path(urllib.parse.unquote(urllib.parse.urlparse(u).path)).stem or "audio")
             self.events.put(("choose",title,u))
-        except Exception as e:self.events.put(("error",str(e),u))
+        except Exception as e:
+            self.events.put(("error",str(e),u))
 
     def poll(self):
         try:
@@ -139,11 +139,13 @@ class App:
                     out=filedialog.asksaveasfilename(parent=self.root,title="MP3 파일 저장",initialdir=str(folder),initialfile=title+".mp3",defaultextension=".mp3",filetypes=[("MP3 오디오","*.mp3")])
                     if not out:self.finish("저장이 취소되었습니다."); self.record(u,"취소",""); continue
                     self.settings["last_save_dir"]=str(Path(out).resolve().parent); save_settings(self.settings)
-                    self.status.set("MP3로 변환하고 있습니다…"); self.progress.configure(mode="indeterminate"); self.progress.start(10)
-                    threading.Thread(target=self.encode,args=(u,out),daemon=True).start()
+                    self.status.set("음성 데이터를 가져오고 있습니다…"); self.progress.configure(mode="indeterminate"); self.progress.start(10)
+                    threading.Thread(target=self.download_encode,args=(u,out),daemon=True).start()
+                elif e[0]=="status":
+                    self.status.set(e[1])
                 elif e[0]=="done":
                     _,u,out=e; self.finish("추출 및 저장이 완료되었습니다."); self.record(u,"성공",out)
-                    if messagebox.askyesno("추출 성공",f"MP3 저장 완료\n\n{out}\n\n저장 폴더를 여시겠습니까?"): os.startfile(str(Path(out).parent))
+                    if messagebox.askyesno("추출 성공",f"MP3 저장 완료\\n\\n{out}\\n\\n저장 폴더를 여시겠습니까?"): os.startfile(str(Path(out).parent))
                 elif e[0]=="error":
                     _,msg,u=e
                     korean=korean_error(msg)
@@ -152,14 +154,41 @@ class App:
         except queue.Empty: pass
         self.root.after(100,self.poll)
 
-    def encode(self,u,out):
+    def download_encode(self,u,out):
         try:
-            cmd=[self.ffmpeg,"-y","-hide_banner","-loglevel","error","-i",u,"-vn","-codec:a","libmp3lame","-b:a","192k","-ar","48000",out]
-            p=subprocess.run(cmd,capture_output=True,text=True,encoding="utf-8",errors="replace",timeout=7200,creationflags=getattr(subprocess,"CREATE_NO_WINDOW",0))
-            if p.returncode or not Path(out).exists() or Path(out).stat().st_size==0:
-                raise RuntimeError(p.stderr or "서버 접근 또는 오디오 인코딩 오류")
+            with tempfile.TemporaryDirectory(prefix="EasySaveAudio_") as temp:
+                template=str(Path(temp)/"source.%(ext)s")
+                def hook(data):
+                    if data.get("status")=="downloading":
+                        total=data.get("total_bytes") or data.get("total_bytes_estimate")
+                        done=data.get("downloaded_bytes",0)
+                        if total:
+                            pct=max(0,min(100,int(done*100/total)))
+                            self.events.put(("status",f"음성 데이터 다운로드 중… {pct}%"))
+                    elif data.get("status")=="finished":
+                        self.events.put(("status","음성 데이터 수신 완료 · MP3 변환 중…"))
+                opts={"format":"bestaudio/best","outtmpl":template,"quiet":True,"no_warnings":True,
+                      "noplaylist":True,"progress_hooks":[hook],"retries":3,"fragment_retries":3}
+                with yt_dlp.YoutubeDL(opts) as ydl:
+                    info=ydl.extract_info(u,download=True)
+                    candidates=[]
+                    for item in info.get("requested_downloads",[]) if isinstance(info,dict) else []:
+                        if item.get("filepath"): candidates.append(Path(item["filepath"]))
+                    try: candidates.append(Path(ydl.prepare_filename(info)))
+                    except Exception: pass
+                source=next((p for p in candidates if p.exists() and p.is_file()),None)
+                if source is None:
+                    files=[p for p in Path(temp).iterdir() if p.is_file()]
+                    source=files[0] if files else None
+                if source is None: raise RuntimeError("다운로드된 미디어 파일을 찾을 수 없습니다.")
+                self.events.put(("status","MP3 192kbps · 48kHz로 변환 중…"))
+                cmd=[self.ffmpeg,"-y","-hide_banner","-loglevel","error","-i",str(source),"-vn","-codec:a","libmp3lame","-b:a","192k","-ar","48000",out]
+                p=subprocess.run(cmd,capture_output=True,text=True,encoding="utf-8",errors="replace",timeout=7200,creationflags=getattr(subprocess,"CREATE_NO_WINDOW",0))
+                if p.returncode or not Path(out).exists() or Path(out).stat().st_size==0:
+                    raise RuntimeError(p.stderr or "오디오 인코딩 오류")
             self.events.put(("done",u,out))
-        except Exception as e:self.events.put(("error",str(e),u))
+        except Exception as e:
+            self.events.put(("error",str(e),u))
 
     def finish(self,msg):
         self.busy=False; self.progress.stop(); self.progress.configure(mode="determinate",value=100 if "완료" in msg else 0); self.go.configure(state="normal"); self.entry.configure(state="normal"); self.status.set(msg)
