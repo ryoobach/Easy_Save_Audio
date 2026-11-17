@@ -7,7 +7,7 @@ from tkinter import ttk, filedialog, messagebox
 import imageio_ffmpeg
 
 APP="Easy Save Audio"
-VERSION="1.0.9"
+VERSION="1.1.0"
 APPDATA=Path(os.environ.get("APPDATA", str(Path.home()))) / "EasySaveAudio"
 APPDATA.mkdir(parents=True, exist_ok=True)
 SETTINGS=APPDATA/"settings.json"
@@ -104,7 +104,7 @@ class App:
         row=tk.Frame(f,bg="#f5f5f5"); row.pack(fill="x")
         self.go=ttk.Button(row,text="확인 · MP3 만들기",command=self.start); self.go.pack(side="left")
         ttk.Button(row,text="작업 기록",command=self.history).pack(side="left",padx=8)
-        tk.Label(row,text="MP3  |  192 kbps  |  48 kHz",bg="#f5f5f5").pack(side="right")
+        tk.Label(row,text="MP3  |  320 kbps  |  음량 자동 보정",bg="#f5f5f5").pack(side="right")
         tk.Label(f,textvariable=self.status,bg="#f5f5f5").pack(anchor="w",pady=(22,6))
         self.progress=ttk.Progressbar(f,maximum=100); self.progress.pack(fill="x")
         tk.Label(f,text="지원 사이트의 공개 영상 및 다운로드가 허용된 콘텐츠를 처리합니다. DRM·접근 제한 콘텐츠는 지원하지 않습니다.",fg="#666",bg="#f5f5f5",wraplength=620,justify="left").pack(anchor="w",pady=(12,0))
@@ -192,8 +192,12 @@ class App:
                     files=[p for p in Path(temp).iterdir() if p.is_file()]
                     source=files[0] if files else None
                 if source is None: raise RuntimeError("다운로드된 미디어 파일을 찾을 수 없습니다.")
-                self.events.put(("status","MP3 192kbps · 48kHz로 변환 중…"))
-                cmd=[self.ffmpeg,"-y","-hide_banner","-loglevel","error","-i",str(source),"-vn","-codec:a","libmp3lame","-b:a","192k","-ar","48000",out]
+                self.events.put(("status","MP3 320kbps · 음량 자동 보정 중…"))
+                # 원본 샘플레이트를 유지하고 음악의 통합 음량을 -14 LUFS,
+                # 최대 트루 피크를 -1 dBTP로 맞춰 곡별 체감 음량 차이를 줄입니다.
+                cmd=[self.ffmpeg,"-y","-hide_banner","-loglevel","error","-i",str(source),
+                     "-vn","-af","loudnorm=I=-14:TP=-1.0:LRA=11",
+                     "-codec:a","libmp3lame","-b:a","320k",out]
                 p=subprocess.run(cmd,capture_output=True,text=True,encoding="utf-8",errors="replace",timeout=7200,creationflags=getattr(subprocess,"CREATE_NO_WINDOW",0))
                 if p.returncode or not Path(out).exists() or Path(out).stat().st_size==0:
                     raise RuntimeError(p.stderr or "오디오 인코딩 오류")
