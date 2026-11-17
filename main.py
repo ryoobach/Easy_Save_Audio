@@ -5,9 +5,6 @@ from datetime import datetime
 import tkinter as tk
 from tkinter import ttk, filedialog, messagebox
 import imageio_ffmpeg
-import tempfile
-import shutil
-import yt_dlp
 
 APP="Easy Save Audio"
 VERSION="1.0.8"
@@ -122,31 +119,23 @@ class App:
         threading.Thread(target=self.worker,args=(u,),daemon=True).start()
 
     def worker(self,u):
-        temp_dir=None
         try:
             host=urllib.parse.urlparse(u).netloc.lower()
             is_youtube=(host=="youtu.be" or host.endswith(".youtube.com") or host=="youtube.com" or host.endswith(".youtube-nocookie.com"))
             if is_youtube:
-                # 공개적으로 접근 가능하고 사용자가 다운로드 권한을 가진 영상만 처리합니다.
-                temp_dir=tempfile.mkdtemp(prefix="easy_save_audio_")
-                opts={"format":"bestaudio/best","outtmpl":str(Path(temp_dir)/"source.%(ext)s"),
-                      "noplaylist":True,"quiet":True,"no_warnings":True,"restrictfilenames":True}
+                # 주소의 제목만 확인하고, 실제 음원 다운로드는 저장 위치 선택 후 진행합니다.
+                opts={"quiet":True,"no_warnings":True,"noplaylist":True,"skip_download":True}
                 with yt_dlp.YoutubeDL(opts) as ydl:
-                    info=ydl.extract_info(u,download=True)
-                    title=safe_name(info.get("title") or "audio")
-                candidates=[p for p in Path(temp_dir).iterdir() if p.is_file()]
-                if not candidates: raise RuntimeError("다운로드된 오디오 파일을 찾지 못했습니다.")
-                self.events.put(("choose",title,str(candidates[0]),u,temp_dir))
-                return
-            probe=subprocess.run([self.ffmpeg,"-hide_banner","-i",u],capture_output=True,text=True,encoding="utf-8",errors="replace",timeout=45)
-            info=probe.stderr or ""
-            m=re.search(r"\\btitle\\s*:\\s*(.+)$",info,re.I|re.M)
-            fallback=Path(urllib.parse.unquote(urllib.parse.urlparse(u).path)).stem
-            title=safe_name(m.group(1).strip() if m else (fallback or "audio"))
+                    info=ydl.extract_info(u,download=False)
+                title=safe_name(info.get("title") or "audio")
+            else:
+                probe=subprocess.run([self.ffmpeg,"-hide_banner","-i",u],capture_output=True,text=True,encoding="utf-8",errors="replace",timeout=45)
+                info=probe.stderr or ""
+                m=re.search(r"\\btitle\\s*:\\s*(.+)$",info,re.I|re.M)
+                fallback=Path(urllib.parse.unquote(urllib.parse.urlparse(u).path)).stem
+                title=safe_name(m.group(1).strip() if m else (fallback or "audio"))
             self.events.put(("choose",title,u,u,None))
-        except Exception as e:
-            if temp_dir: shutil.rmtree(temp_dir,ignore_errors=True)
-            self.events.put(("error",str(e),u))
+        except Exception as e:self.events.put(("error",str(e),u))
 
     def poll(self):
         try:
