@@ -5,8 +5,8 @@ import tkinter as tk
 from tkinter import ttk, filedialog, messagebox
 import imageio_ffmpeg
 
-APP="이지 세이브 오디오"
-VERSION="1.0.2"
+APP="Easy Save Audio"
+VERSION="1.0.3"
 APPDATA=Path(os.environ.get("APPDATA", str(Path.home()))) / "EasySaveAudio"
 APPDATA.mkdir(parents=True, exist_ok=True)
 SETTINGS=APPDATA/"settings.json"
@@ -58,11 +58,11 @@ class App:
         self.root.configure(bg="#f5f5f5")
         f=tk.Frame(self.root,bg="#f5f5f5",padx=24,pady=20); f.pack(fill="both",expand=True)
 
-        # 앱 아이콘과 앱 이름을 한 줄에 배치
+        # 앱 아이콘과 영문 앱 이름을 한 줄에 배치
         head=tk.Frame(f,bg="#f5f5f5"); head.pack(fill="x",anchor="w",pady=(0,15))
         tk.Label(head,text="♫",font=("Segoe UI Symbol",27,"bold"),fg="white",bg="#c91d2e",width=2,height=1).pack(side="left",padx=(0,12))
         titlebox=tk.Frame(head,bg="#f5f5f5"); titlebox.pack(side="left",fill="y")
-        tk.Label(titlebox,text=APP,font=("Malgun Gothic",19,"bold"),fg="#c91d2e",bg="#f5f5f5").pack(anchor="w")
+        tk.Label(titlebox,text=APP,font=("Segoe UI",19,"bold"),fg="#c91d2e",bg="#f5f5f5").pack(anchor="w")
         tk.Label(titlebox,text="Ryoo jaesang & 최피디",font=("Malgun Gothic",9),fg="#666",bg="#f5f5f5").pack(anchor="w")
 
         tk.Label(f,text="영상 주소를 입력하면 재생 없이 MP3로 추출합니다.",bg="#f5f5f5",font=("Malgun Gothic",10)).pack(anchor="w",pady=(0,14))
