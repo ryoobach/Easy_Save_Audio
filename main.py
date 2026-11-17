@@ -1,4 +1,4 @@
-import json, os, re, subprocess, threading, queue, urllib.parse
+import json, os, re, subprocess, threading, queue, urllib.parse, sys
 from pathlib import Path
 from datetime import datetime
 import tkinter as tk
@@ -10,6 +10,13 @@ VERSION="1.0.0"
 APPDATA=Path(os.environ.get("APPDATA", str(Path.home()))) / "EasySaveAudio"
 APPDATA.mkdir(parents=True, exist_ok=True)
 SETTINGS=APPDATA/"settings.json"
+
+def ffmpeg_binary():
+    if getattr(sys, "frozen", False):
+        base=Path(getattr(sys, "_MEIPASS", Path(sys.executable).parent))
+        matches=list(base.glob("ffmpeg*.exe"))
+        if matches: return str(matches[0])
+    return imageio_ffmpeg.get_ffmpeg_exe()
 
 def load_settings():
     try:
@@ -29,7 +36,7 @@ def safe_name(s):
 class App:
     def __init__(self,root):
         self.root=root; self.root.title(f"{APP} {VERSION}"); self.root.geometry("620x360"); self.root.minsize(560,330)
-        self.settings=load_settings(); self.events=queue.Queue(); self.busy=False; self.ffmpeg=imageio_ffmpeg.get_ffmpeg_exe()
+        self.settings=load_settings(); self.events=queue.Queue(); self.busy=False; self.ffmpeg=ffmpeg_binary()
         self.url=tk.StringVar(value=self.settings.get("last_url","")); self.status=tk.StringVar(value="대기 중")
         self.build(); self.root.after(100,self.poll)
     def build(self):
