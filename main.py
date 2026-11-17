@@ -163,7 +163,7 @@ class App:
                     self.progress.stop(); self.progress.configure(mode="determinate",value=pct)
                     self.percent.set(f"{pct}%"); self.status.set(label)
                 elif e[0]=="progress_unknown":
-                    self.progress.stop(); self.progress.configure(mode="determinate",value=0)
+                    self.progress.stop()
                     self.percent.set("--%"); self.status.set(e[1])
                 elif e[0]=="done":
                     _,u,out=e; self.finish("추출 및 저장이 완료되었습니다."); self.record(u,"성공",out)
@@ -185,12 +185,12 @@ class App:
                         total=data.get("total_bytes") or data.get("total_bytes_estimate")
                         done=data.get("downloaded_bytes",0)
                         if total:
-                            pct=max(0,min(99,int(done*100/total)))
+                            pct=max(0,min(49,int(done*50/total)))
                             self.events.put(("progress",pct,"음성 데이터 다운로드 중…"))
                         else:
                             self.events.put(("progress_unknown","음성 데이터 다운로드 중… (진행률 확인 중)"))
                     elif data.get("status")=="finished":
-                        self.events.put(("progress",100,"음성 데이터 수신 완료 · MP3 변환 준비 중…"))
+                        self.events.put(("progress",50,"음성 데이터 수신 완료 · MP3 변환 준비 중…"))
                 opts={"format":"bestaudio/best","outtmpl":template,"quiet":True,"no_warnings":True,
                       "noplaylist":True,"progress_hooks":[hook],"retries":3,"fragment_retries":3}
                 with yt_dlp.YoutubeDL(opts) as ydl:
@@ -205,7 +205,7 @@ class App:
                     files=[p for p in Path(temp).iterdir() if p.is_file()]
                     source=files[0] if files else None
                 if source is None: raise RuntimeError("다운로드된 미디어 파일을 찾을 수 없습니다.")
-                self.events.put(("progress",0,"MP3 320kbps · 음량 자동 보정 중…"))
+                self.events.put(("progress",50,"MP3 320kbps · 음량 자동 보정 중…"))
                 # 원본 샘플레이트를 유지하고 음악의 통합 음량을 -14 LUFS,
                 # 최대 트루 피크를 -1 dBTP로 맞춰 곡별 체감 음량 차이를 줄입니다.
                 duration=info.get("duration") if isinstance(info,dict) else None
@@ -221,7 +221,7 @@ class App:
                         try:
                             seconds=int(line.split("=",1)[1])/1000000.0
                             if duration and float(duration)>0:
-                                pct=max(0,min(99,int(seconds*100/float(duration))))
+                                pct=50+max(0,min(49,int(seconds*50/float(duration))))
                                 self.events.put(("progress",pct,"MP3 변환 및 음량 보정 중…"))
                             else:
                                 self.events.put(("progress_unknown","MP3 변환 및 음량 보정 중…"))
