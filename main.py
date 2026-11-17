@@ -6,7 +6,7 @@ from tkinter import ttk, filedialog, messagebox
 import imageio_ffmpeg
 
 APP="이지 세이브 오디오"
-VERSION="1.0.0"
+VERSION="1.0.1"
 APPDATA=Path(os.environ.get("APPDATA", str(Path.home()))) / "EasySaveAudio"
 APPDATA.mkdir(parents=True, exist_ok=True)
 SETTINGS=APPDATA/"settings.json"
@@ -35,18 +35,49 @@ def safe_name(s):
 
 class App:
     def __init__(self,root):
-        self.root=root; self.root.title(f"{APP} {VERSION}"); self.root.geometry("620x360"); self.root.minsize(560,330)
+        self.root=root
+        self.root.title(f"{APP} {VERSION}")
+        self.root.geometry("680x390")
+        self.root.minsize(610,360)
         self.settings=load_settings(); self.events=queue.Queue(); self.busy=False; self.ffmpeg=ffmpeg_binary()
         self.url=tk.StringVar(value=self.settings.get("last_url","")); self.status=tk.StringVar(value="대기 중")
         self.build(); self.root.after(100,self.poll)
+
+    def paste_url(self):
+        try:
+            value=self.root.clipboard_get()
+            self.url.set(value.strip())
+            self.entry.focus_set()
+            self.entry.icursor(tk.END)
+        except tk.TclError:
+            messagebox.showinfo("붙여넣기","클립보드에 붙여넣을 주소가 없습니다.")
+
     def build(self):
         self.root.configure(bg="#f5f5f5")
         f=tk.Frame(self.root,bg="#f5f5f5",padx=24,pady=20); f.pack(fill="both",expand=True)
-        tk.Label(f,text="♫",font=("Segoe UI Symbol",28,"bold"),fg="white",bg="#c91d2e",width=2).pack(anchor="w")
-        tk.Label(f,text=APP,font=("Malgun Gothic",19,"bold"),fg="#c91d2e",bg="#f5f5f5").pack(anchor="w",pady=(5,0))
-        tk.Label(f,text="영상 주소를 입력하면 재생 없이 MP3로 추출합니다.",bg="#f5f5f5",font=("Malgun Gothic",10)).pack(anchor="w",pady=(2,15))
+
+        # 앱 아이콘과 앱 이름을 한 줄에 배치
+        head=tk.Frame(f,bg="#f5f5f5"); head.pack(fill="x",anchor="w",pady=(0,15))
+        tk.Label(head,text="♫",font=("Segoe UI Symbol",27,"bold"),fg="white",bg="#c91d2e",width=2,height=1).pack(side="left",padx=(0,12))
+        titlebox=tk.Frame(head,bg="#f5f5f5"); titlebox.pack(side="left",fill="y")
+        tk.Label(titlebox,text=APP,font=("Malgun Gothic",19,"bold"),fg="#c91d2e",bg="#f5f5f5").pack(anchor="w")
+        tk.Label(titlebox,text="Ryoo jaesang & 최피디",font=("Malgun Gothic",9),fg="#666",bg="#f5f5f5").pack(anchor="w")
+
+        tk.Label(f,text="영상 주소를 입력하면 재생 없이 MP3로 추출합니다.",bg="#f5f5f5",font=("Malgun Gothic",10)).pack(anchor="w",pady=(0,14))
         tk.Label(f,text="영상 직접 다운로드 주소",bg="#f5f5f5").pack(anchor="w")
-        self.entry=ttk.Entry(f,textvariable=self.url); self.entry.pack(fill="x",pady=(5,12),ipady=5); self.entry.bind("<Return>",lambda e:self.start())
+
+        # 일반 Tk Entry로 입력 포커스/마우스 동작을 명확히 하고 별도 붙여넣기 버튼 제공
+        urlrow=tk.Frame(f,bg="#f5f5f5"); urlrow.pack(fill="x",pady=(5,12))
+        self.entry=tk.Entry(urlrow,textvariable=self.url,font=("Segoe UI",11),relief="solid",bd=1,
+                            highlightthickness=1,highlightbackground="#b8b8b8",highlightcolor="#c91d2e")
+        self.entry.pack(side="left",fill="x",expand=True,ipady=7)
+        self.entry.bind("<Button-1>",lambda e:self.entry.focus_set())
+        self.entry.bind("<Control-v>",lambda e:self.paste_url())
+        self.entry.bind("<Control-V>",lambda e:self.paste_url())
+        self.entry.bind("<Shift-Insert>",lambda e:self.paste_url())
+        self.entry.bind("<Return>",lambda e:self.start())
+        ttk.Button(urlrow,text="붙여넣기",command=self.paste_url).pack(side="left",padx=(8,0),ipady=3)
+
         row=tk.Frame(f,bg="#f5f5f5"); row.pack(fill="x")
         self.go=ttk.Button(row,text="확인 · MP3 만들기",command=self.start); self.go.pack(side="left")
         ttk.Button(row,text="작업 기록",command=self.history).pack(side="left",padx=8)
@@ -54,7 +85,7 @@ class App:
         tk.Label(f,textvariable=self.status,bg="#f5f5f5").pack(anchor="w",pady=(22,6))
         self.progress=ttk.Progressbar(f,maximum=100); self.progress.pack(fill="x")
         tk.Label(f,text="다운로드·변환 권한이 있는 직접 미디어 주소만 지원합니다.",fg="#666",bg="#f5f5f5").pack(anchor="w",pady=(12,0))
-        tk.Label(f,text="Developer: Ryoo jaesang",fg="#777",bg="#f5f5f5",font=("Segoe UI",8)).pack(anchor="e",side="bottom")
+
     def start(self):
         if self.busy:return
         u=self.url.get().strip(); p=urllib.parse.urlparse(u)
@@ -63,6 +94,7 @@ class App:
         self.busy=True; self.go.configure(state="disabled"); self.entry.configure(state="disabled")
         self.settings["last_url"]=u; save_settings(self.settings); self.status.set("영상 정보를 확인하고 있습니다…"); self.progress.configure(mode="indeterminate"); self.progress.start(10)
         threading.Thread(target=self.worker,args=(u,),daemon=True).start()
+
     def worker(self,u):
         try:
             probe=subprocess.run([self.ffmpeg,"-hide_banner","-i",u],capture_output=True,text=True,encoding="utf-8",errors="replace",timeout=45)
@@ -72,6 +104,7 @@ class App:
             title=safe_name(m.group(1).strip() if m else Path(urllib.parse.unquote(urllib.parse.urlparse(u).path)).stem)
             self.events.put(("choose",title,u))
         except Exception as e:self.events.put(("error",str(e),u))
+
     def poll(self):
         try:
             while True:
@@ -92,6 +125,7 @@ class App:
                     _,msg,u=e; self.finish("추출에 실패했습니다."); self.record(u,"실패",msg); messagebox.showerror("추출 실패",msg)
         except queue.Empty: pass
         self.root.after(100,self.poll)
+
     def encode(self,u,out):
         try:
             cmd=[self.ffmpeg,"-y","-hide_banner","-loglevel","error","-i",u,"-vn","-codec:a","libmp3lame","-b:a","192k","-ar","48000",out]
@@ -100,19 +134,25 @@ class App:
                 raise RuntimeError("MP3 변환에 실패했습니다.\n"+(p.stderr or "서버 접근 또는 오디오 인코딩 오류").strip()[-1800:])
             self.events.put(("done",u,out))
         except Exception as e:self.events.put(("error",str(e),u))
+
     def finish(self,msg):
         self.busy=False; self.progress.stop(); self.progress.configure(mode="determinate",value=100 if "완료" in msg else 0); self.go.configure(state="normal"); self.entry.configure(state="normal"); self.status.set(msg)
+
     def record(self,u,result,detail):
         h=self.settings.get("history",[]); h.insert(0,{"time":datetime.now().astimezone().strftime("%Y-%m-%d %H:%M:%S"),"url":u,"result":result,"detail":detail})
         self.settings["history"]=h[:200]; save_settings(self.settings)
+
     def history(self):
         w=tk.Toplevel(self.root); w.title("작업 기록"); w.geometry("780x380")
         t=ttk.Treeview(w,columns=("time","result","detail"),show="headings"); t.heading("time",text="작업 시각"); t.heading("result",text="결과"); t.heading("detail",text="저장 파일 / 오류")
         t.column("time",width=150); t.column("result",width=70); t.column("detail",width=520); t.pack(fill="both",expand=True,padx=10,pady=10)
         for x in self.settings.get("history",[]):t.insert("","end",values=(x.get("time",""),x.get("result",""),x.get("detail","")))
         if not self.settings.get("history"):t.insert("","end",values=("","","기록이 없습니다."))
+
 if __name__=="__main__":
     root=tk.Tk()
-    try: root.iconbitmap("easy_save_audio.ico")
+    try:
+        if getattr(sys,"frozen",False): root.iconbitmap(str(Path(sys._MEIPASS)/"easy_save_audio.ico"))
+        else: root.iconbitmap("easy_save_audio.ico")
     except Exception: pass
     App(root); root.mainloop()
