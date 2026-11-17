@@ -6,7 +6,7 @@ from tkinter import ttk, filedialog, messagebox
 import imageio_ffmpeg
 
 APP="Easy Save Audio"
-VERSION="1.0.5"
+VERSION="1.0.6"
 APPDATA=Path(os.environ.get("APPDATA", str(Path.home()))) / "EasySaveAudio"
 APPDATA.mkdir(parents=True, exist_ok=True)
 SETTINGS=APPDATA/"settings.json"
@@ -32,6 +32,18 @@ def save_settings(d):
 
 def safe_name(s):
     return (re.sub(r'[\\/:*?"<>|\x00-\x1f]',"_",s).strip(" .") or "audio")[:150]
+
+def korean_error(message):
+    s=(message or "").lower()
+    if "403" in s or "forbidden" in s: return "서버가 다운로드 요청을 거부했습니다. 해당 사이트에서 허용하는 직접 다운로드 주소인지 확인해 주세요."
+    if "404" in s or "not found" in s: return "요청한 미디어 파일을 찾을 수 없습니다. 주소가 정확한지 확인해 주세요."
+    if "401" in s or "unauthorized" in s: return "접근 권한이 없는 주소입니다. 인증이 필요한 주소는 지원하지 않을 수 있습니다."
+    if "timed out" in s or "timeout" in s: return "서버 응답 시간이 초과되었습니다. 인터넷 연결을 확인한 뒤 다시 시도해 주세요."
+    if "could not resolve" in s or "no such host" in s or "name or service not known" in s: return "주소의 서버를 찾을 수 없습니다. 인터넷 연결과 주소를 확인해 주세요."
+    if "invalid data found" in s or "does not contain any stream" in s or "unknown format" in s: return "지원하는 미디어 파일을 확인하지 못했습니다. 웹페이지 주소가 아닌 직접 미디어 파일 주소를 입력해 주세요."
+    if "connection refused" in s or "network is unreachable" in s or "connection reset" in s: return "서버에 연결하지 못했습니다. 네트워크 상태나 서버의 접근 제한을 확인해 주세요."
+    if "no space left" in s: return "저장 공간이 부족합니다. 저장 드라이브의 여유 공간을 확보해 주세요."
+    return "미디어를 가져오거나 MP3로 변환하지 못했습니다. 직접 미디어 파일 주소인지, 다운로드 권한이 있는지 확인해 주세요."
 
 class App:
     def __init__(self,root):
@@ -130,7 +142,10 @@ class App:
                     _,u,out=e; self.finish("추출 및 저장이 완료되었습니다."); self.record(u,"성공",out)
                     if messagebox.askyesno("추출 성공",f"MP3 저장 완료\n\n{out}\n\n저장 폴더를 여시겠습니까?"): os.startfile(str(Path(out).parent))
                 elif e[0]=="error":
-                    _,msg,u=e; self.finish("추출에 실패했습니다."); self.record(u,"실패",msg); messagebox.showerror("추출 실패",msg)
+                    _,msg,u=e
+                    korean=korean_error(msg)
+                    self.finish("추출에 실패했습니다."); self.record(u,"실패",korean)
+                    messagebox.showerror("추출 실패",korean)
         except queue.Empty: pass
         self.root.after(100,self.poll)
 
@@ -139,7 +154,7 @@ class App:
             cmd=[self.ffmpeg,"-y","-hide_banner","-loglevel","error","-i",u,"-vn","-codec:a","libmp3lame","-b:a","192k","-ar","48000",out]
             p=subprocess.run(cmd,capture_output=True,text=True,encoding="utf-8",errors="replace",timeout=7200,creationflags=getattr(subprocess,"CREATE_NO_WINDOW",0))
             if p.returncode or not Path(out).exists() or Path(out).stat().st_size==0:
-                raise RuntimeError("MP3 변환에 실패했습니다.\n"+(p.stderr or "서버 접근 또는 오디오 인코딩 오류").strip()[-1800:])
+                raise RuntimeError(p.stderr or "서버 접근 또는 오디오 인코딩 오류")
             self.events.put(("done",u,out))
         except Exception as e:self.events.put(("error",str(e),u))
 
@@ -160,7 +175,8 @@ class App:
 if __name__=="__main__":
     root=tk.Tk()
     try:
-        if getattr(sys,"frozen",False): root.iconbitmap(str(Path(sys._MEIPASS)/"easy_save_audio.ico"))
-        else: root.iconbitmap("easy_save_audio.ico")
-    except Exception: pass
+        icon_path=Path(getattr(sys,"_MEIPASS",Path(__file__).resolve().parent))/"easy_save_audio.ico"
+        root.iconbitmap(str(icon_path))
+    except Exception:
+        pass
     App(root); root.mainloop()
