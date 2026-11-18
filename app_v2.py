@@ -24,7 +24,7 @@ except ImportError:
     TkinterDnD = None
 
 APP_NAME = "Easy Save Audio & Video"
-APP_VERSION = "2.0.8"
+APP_VERSION = "2.0.9"
 APPDATA = Path(os.environ.get("APPDATA", str(Path.home()))) / "EasySaveAudio"
 APPDATA.mkdir(parents=True, exist_ok=True)
 SETTINGS_FILE = APPDATA / "settings.json"
@@ -225,7 +225,7 @@ class EasySaveApp:
         # 오른쪽 여백을 탭 안쪽 버튼 영역과 맞춰 버튼 끝선을 통일합니다.
         queue_header.pack(fill="x", pady=(3, 4))
         ttk.Label(queue_header, text="작업 목록", font=("Malgun Gothic", 12, "bold")).pack(side="left")
-        ttk.Button(queue_header, text="완료 작업 지우기", command=self.clear_completed, style="Action.TButton", width=16).pack(side="right")
+        ttk.Button(queue_header, text="완료 작업 지우기", command=self.clear_completed, style="Action.TButton", width=16).pack(side="right", padx=(0, 8))
         self.concurrent_label = ttk.Label(queue_header, text="동시 실행 0개", foreground="#666")
         self.concurrent_label.pack(side="right", padx=(12, 12))
 
@@ -259,7 +259,7 @@ class EasySaveApp:
         options.pack(fill="x", pady=(0, 8))
         options.pack_propagate(False)
         both = tk.BooleanVar(value=False)
-        other_label = "동영상" if mode == "mp3" else "동영상(MP3)"
+        other_label = "동영상" if mode == "mp3" else "MP3"
         option_group = ttk.Frame(options)
         ttk.Checkbutton(option_group, text=other_label, variable=both).pack(side="left", padx=(0, 18))
         ttk.Checkbutton(
@@ -766,41 +766,39 @@ class EasySaveApp:
     def show_about(self):
         win = tk.Toplevel(self.root)
         win.title("앱 정보")
-        win.geometry("500x340")
-        win.minsize(460, 320)
+        win.geometry("500x225")
+        win.minsize(460, 210)
         win.transient(self.root)
         win.resizable(False, False)
 
-        outer = ttk.Frame(win, padding=(30, 24))
+        outer = ttk.Frame(win, padding=(24, 18))
         outer.pack(fill="both", expand=True)
 
+        title_row = ttk.Frame(outer)
+        title_row.pack(anchor="w", fill="x", pady=(2, 8))
         ttk.Label(
-            outer, text=APP_NAME,
-            font=("Malgun Gothic", 17, "bold"), wraplength=420, justify="center"
-        ).pack(fill="x", pady=(4, 8))
+            title_row, text=APP_NAME,
+            font=("Malgun Gothic", 15, "bold")
+        ).pack(side="left")
         ttk.Label(
-            outer, text=f"버전 {APP_VERSION}",
-            font=("Segoe UI", 12, "bold"), foreground="#b51f32"
-        ).pack(pady=(0, 18))
+            title_row, text=APP_VERSION,
+            font=("Segoe UI", 11, "bold"), foreground="#b51f32"
+        ).pack(side="left", padx=(9, 0))
 
         details = ttk.Frame(outer)
-        details.pack(fill="x", padx=18)
-        # 앱 이름과 버전은 위쪽에 이미 표시하므로 중복 항목은 생략합니다.
+        details.pack(fill="x", padx=2)
         ttk.Label(
             details, text="Windows 64비트",
             font=("Malgun Gothic", 10)
-        ).pack(anchor="w", pady=6)
+        ).pack(anchor="w", pady=(0, 5))
         ttk.Label(
             details, text="2026년 11월 18일",
             font=("Malgun Gothic", 10)
-        ).pack(anchor="w", pady=6)
-
-        ttk.Separator(outer).pack(fill="x", pady=(16, 12))
+        ).pack(anchor="w", pady=(0, 12))
         ttk.Label(
             outer, text="Ryoo jaesang & 최피디",
             font=("Malgun Gothic", 10)
-        ).pack()
-        ttk.Button(outer, text="닫기", command=win.destroy, width=12).pack(pady=(14, 0))
+        ).pack(anchor="w", padx=2)
 
         win.update_idletasks()
         x = self.root.winfo_rootx() + (self.root.winfo_width() - win.winfo_width()) // 2
