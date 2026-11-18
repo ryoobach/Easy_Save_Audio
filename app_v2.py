@@ -182,8 +182,8 @@ class EasySaveApp:
             variable=self.browser_drag_var
         ).pack(side="left")
 
-        # 체크박스 묶음의 오른쪽 끝을 두 번째 탭 제목("동영상 다운로드")의
-        # 오른쪽 끝과 맞춥니다. 탭/글꼴 크기가 달라져도 실제 글자 폭으로 계산합니다.
+        # 체크박스 두 개의 시작점을 두 번째 탭 제목("동영상 다운로드")의
+        # 왼쪽 시작점에 맞춥니다. 실제 탭 글꼴 폭으로 계산해 창 크기와 무관하게 정렬합니다.
         def align_option_group():
             try:
                 import tkinter.font as tkfont
@@ -196,9 +196,8 @@ class EasySaveApp:
                 else:
                     tab_pad = 8
                 first_width = tab_font.measure("MP3 다운로드") + tab_pad * 2
-                second_width = tab_font.measure("동영상 다운로드") + tab_pad * 2
-                tab_right_root = self.tabs.winfo_rootx() + first_width + second_width
-                group_left = tab_right_root - options.winfo_rootx() - option_group.winfo_reqwidth()
+                second_tab_left_root = self.tabs.winfo_rootx() + first_width
+                group_left = second_tab_left_root - options.winfo_rootx()
                 option_group.place(x=max(0, group_left), y=0)
             except Exception:
                 option_group.place(x=0, y=0)
