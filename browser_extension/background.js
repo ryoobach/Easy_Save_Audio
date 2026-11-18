@@ -7,7 +7,7 @@ function createContextMenu() {
   chrome.contextMenus.removeAll(() => {
     chrome.contextMenus.create({
       id: MENU_ID,
-      title: "Easy Save Audio & Video - 주소복사",
+      title: "동영상 주소 복사",
       contexts: ["page", "link", "video"]
     });
   });
