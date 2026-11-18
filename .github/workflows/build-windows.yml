@@ -36,17 +36,11 @@ jobs:
           $ffmpeg = python -c "import imageio_ffmpeg; print(imageio_ffmpeg.get_ffmpeg_exe())"
           $appExe = "EasySaveAudioVideo_v$version"
           python -m PyInstaller --noconfirm --clean --onefile --windowed --name $appExe --icon easy_save_audio.ico --add-data "easy_save_audio.png;." --add-data "easy_save_audio.ico;." --add-binary "$ffmpeg;." --collect-all yt_dlp --collect-all tkinterdnd2 app_v2.py
-          $installerExe = "rightclick_install"
-          python -m PyInstaller --noconfirm --clean --onefile --windowed --name $installerExe --add-data "browser_extension;browser_extension" browser_extension_installer.py
           $zipName = "Easy_Save_Audio_Video_v$($version)_Windows_x64.zip"
           $packageDir = "dist/package"
-          New-Item -ItemType Directory -Force -Path "$packageDir/browser_extension" | Out-Null
           Copy-Item "dist/$appExe.exe" "$packageDir/$appExe.exe"
-          Copy-Item "dist/$installerExe.exe" "$packageDir/$installerExe.exe"
-          Copy-Item browser_extension/* "$packageDir/browser_extension/"
-          Copy-Item BROWSER_EXTENSION_SETUP.txt "$packageDir/BROWSER_EXTENSION_SETUP.txt"
           Compress-Archive -Path "$packageDir/*" -DestinationPath "dist/$zipName" -Force
-          Write-Host "Created dist/$zipName with versioned app and rightclick_install.exe"
+          Write-Host "Created dist/$zipName with the versioned application"
       - name: Upload versioned Windows ZIP
         uses: actions/upload-artifact@v4
         with:

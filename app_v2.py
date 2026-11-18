@@ -24,7 +24,7 @@ except ImportError:
     TkinterDnD = None
 
 APP_NAME = "Easy Save Audio & Video"
-APP_VERSION = "2.1.0"
+APP_VERSION = "2.1.1"
 APPDATA = Path(os.environ.get("APPDATA", str(Path.home()))) / "EasySaveAudio"
 APPDATA.mkdir(parents=True, exist_ok=True)
 SETTINGS_FILE = APPDATA / "settings.json"
@@ -87,93 +87,13 @@ class EasySaveApp:
         self.executor = ThreadPoolExecutor(max_workers=2, thread_name_prefix="media-job")
         self.ffmpeg = ffmpeg_path()
         self.closing = False
-        self.drop_contexts = {}
         self.dnd_error = None
-        self.browser_drag_var = tk.BooleanVar(value=False)
-        self.browser_menu_enabled = False
         self.build_ui()
-        self.start_browser_bridge()
         # The root window is also a drop target, so files/links can be dropped
         # anywhere in the application, not only on the URL entry or tab frame.
         self.register_drop_target(self.root, self.handle_window_drop)
         self.root.protocol("WM_DELETE_WINDOW", self.on_close)
         self.root.after(100, self.poll_events)
-
-    def start_browser_bridge(self):
-        app = self
-
-        class BridgeHandler(http.server.BaseHTTPRequestHandler):
-            def _headers(self, status=200):
-                self.send_response(status)
-                self.send_header("Content-Type", "application/json; charset=utf-8")
-                self.send_header("Access-Control-Allow-Origin", "*")
-                self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
-                self.send_header("Access-Control-Allow-Headers", "Content-Type")
-                self.end_headers()
-
-            def do_OPTIONS(self):
-                self._headers(204)
-
-            def do_GET(self):
-                if self.path != "/status":
-                    self._headers(404)
-                    self.wfile.write(b'{"ok":false}')
-                    return
-                enabled = bool(app.browser_menu_enabled)
-                self._headers()
-                self.wfile.write(json.dumps({"enabled": enabled}).encode("utf-8"))
-
-            def do_POST(self):
-                if self.path != "/insert":
-                    self._headers(404)
-                    self.wfile.write(b'{"ok":false}')
-                    return
-                try:
-                    length = int(self.headers.get("Content-Length", "0"))
-                    payload = json.loads(self.rfile.read(length).decode("utf-8"))
-                    url = str(payload.get("url", "")).strip()
-                    if not is_url(url) or not app.browser_menu_enabled:
-                        self._headers(400)
-                        self.wfile.write(b'{"ok":false}')
-                        return
-                    app.root.after(0, lambda value=url: app.insert_browser_url(value))
-                    self._headers()
-                    self.wfile.write(b'{"ok":true}')
-                except Exception:
-                    self._headers(400)
-                    self.wfile.write(b'{"ok":false}')
-
-            def log_message(self, _format, *_args):
-                return
-
-        try:
-            self.browser_server = http.server.ThreadingHTTPServer(("127.0.0.1", 8765), BridgeHandler)
-            self.browser_server.daemon_threads = True
-            self.browser_server_thread = threading.Thread(
-                target=self.browser_server.serve_forever, daemon=True, name="browser-bridge"
-            )
-            self.browser_server_thread.start()
-        except OSError as exc:
-            self.browser_server = None
-            self.dnd_error = (self.dnd_error or "") + f" 브라우저 연결 포트 오류: {exc}"
-
-    def on_browser_menu_toggle(self):
-        self.browser_menu_enabled = bool(self.browser_drag_var.get())
-
-    def insert_browser_url(self, url):
-        if not self.browser_drag_var.get():
-            return
-        selected = self.tabs.select()
-        context = next(
-            (value for tab, value in self.drop_contexts.items() if str(tab) == selected),
-            None
-        )
-        if context is None:
-            return
-        _mode, _both, url_var = context
-        url_var.set(url)
-        self.root.lift()
-        self.root.focus_force()
 
     def build_ui(self):
         style = ttk.Style()
@@ -211,20 +131,12 @@ class EasySaveApp:
             side="right", anchor="center", padx=(10, 14), pady=0
         )
 
-        # 탭은 제목 줄 아래에서 작업 목록과 같은 부모/가로 폭을 사용합니다.
-        self.tabs = ttk.Notebook(outer)
-        self.tabs.pack(fill="x", expand=False, padx=0, pady=(2, 0))
-        self.mp3_tab = ttk.Frame(self.tabs, padding=10)
-        self.video_tab = ttk.Frame(self.tabs, padding=10)
-        self.tabs.add(self.mp3_tab, text="MP3 다운로드")
-        self.tabs.add(self.video_tab, text="동영상 다운로드")
-        self.build_tab(self.mp3_tab, "mp3")
-        self.build_tab(self.video_tab, "video")
+        self.build_main_panel(outer)
 
         queue_header = ttk.Frame(outer)
         # 오른쪽 여백을 탭 안쪽 버튼 영역과 맞춰 버튼 끝선을 통일합니다.
         queue_header.pack(fill="x", pady=(2, 3))
-        ttk.Label(queue_header, text="작업 목록", font=("Malgun Gothic", 12, "bold")).pack(side="left")
+        ttk.Label(queue_header, text="작업 목록").pack(side="left")
         ttk.Button(queue_header, text="완료 작업 지우기", command=self.clear_completed, style="Action.TButton", width=16).pack(side="right", padx=(0, 10))
         self.concurrent_label = ttk.Label(queue_header, text="동시 실행 0개", foreground="#666")
         self.concurrent_label.pack(side="right", padx=(12, 12))
@@ -253,135 +165,66 @@ class EasySaveApp:
         ttk.Button(controls, text="작업 기록", command=self.show_history).pack(side="left", padx=8)
         ttk.Label(controls, text="다운로드 및 변환 작업은 각각 독립적으로 처리됩니다.", foreground="#666").pack(side="right")
 
-    def build_tab(self, tab, mode):
-        # Reference layout: options first, then one address row, then save folder/actions.
-        options = ttk.Frame(tab, height=30)
-        options.pack(fill="x", pady=(0, 5))
-        options.pack_propagate(False)
-        both = tk.BooleanVar(value=False)
-        other_label = "동영상" if mode == "mp3" else "MP3"
-        option_group = ttk.Frame(options)
-        ttk.Checkbutton(option_group, text=other_label, variable=both).pack(side="left", padx=(0, 18))
-        ttk.Checkbutton(
-            option_group, text="오른쪽 마우스 메뉴 주소 복사",
-            variable=self.browser_drag_var,
-            command=self.on_browser_menu_toggle
-        ).pack(side="left")
+    def build_main_panel(self, outer):
+        panel = ttk.Frame(outer, padding=10)
+        panel.pack(fill="x", pady=(2, 0))
 
-        # 체크박스 두 개의 시작점을 두 번째 탭 제목("동영상 다운로드")의
-        # 왼쪽 시작점에 맞춥니다. 실제 탭 글꼴 폭으로 계산해 창 크기와 무관하게 정렬합니다.
-        def align_option_group():
-            try:
-                import tkinter.font as tkfont
-                self.tabs.update_idletasks()
-                tab_font_name = ttk.Style().lookup("TNotebook.Tab", "font") or "TkDefaultFont"
-                tab_font = tkfont.nametofont(tab_font_name) if isinstance(tab_font_name, str) and tab_font_name in tkfont.names() else tkfont.Font(font=tab_font_name)
-                pad = ttk.Style().lookup("TNotebook.Tab", "padding")
-                if isinstance(pad, (tuple, list)):
-                    tab_pad = int(pad[0]) if pad else 8
-                else:
-                    tab_pad = 8
-                first_width = tab_font.measure("MP3 다운로드") + tab_pad * 2
-                second_tab_left_root = self.tabs.winfo_rootx() + first_width
-                # 두 번째 탭의 실제 위치를 기준으로 체크박스 시작점을 맞춥니다.
-                second_tab_box = self.tabs.tk.call(self.tabs._w, "bbox", 1)
-                if second_tab_box and len(second_tab_box) == 4:
-                    second_tab_left_root = self.tabs.winfo_rootx() + int(second_tab_box[0])
-                group_left = second_tab_left_root - options.winfo_rootx()
-                option_group.place(x=max(0, group_left), y=0)
-                options.configure(height=max(30, option_group.winfo_reqheight()))
-                options.pack_propagate(False)
-            except Exception:
-                option_group.place(x=0, y=0)
-                options.configure(height=max(30, option_group.winfo_reqheight()))
-                options.pack_propagate(False)
+        options = ttk.Frame(panel)
+        options.pack(fill="x", pady=(0, 8))
+        self.mp3_var = tk.BooleanVar(value=True)
+        self.video_var = tk.BooleanVar(value=False)
+        ttk.Checkbutton(options, text="MP3", variable=self.mp3_var).pack(side="left", padx=(0, 22))
+        ttk.Checkbutton(options, text="동영상", variable=self.video_var).pack(side="left")
 
-        self.root.after_idle(align_option_group)
-        # 숨겨진 탭은 좌표가 확정되지 않을 수 있으므로 탭을 선택할 때도 다시 정렬합니다.
-        self.tabs.bind("<<NotebookTabChanged>>", lambda _event: self.root.after_idle(align_option_group), add="+")
-
-        input_row = ttk.Frame(tab)
-        input_row.pack(fill="x", pady=(0, 7))
+        input_row = ttk.Frame(panel)
+        input_row.pack(fill="x", pady=(0, 8))
         ttk.Label(input_row, text="주소", font=("Malgun Gothic", 11)).pack(side="left", padx=(0, 32))
-        url_var = tk.StringVar()
-        self.drop_contexts[tab] = (mode, both, url_var)
-        entry = ttk.Entry(input_row, textvariable=url_var)
+        self.url_var = tk.StringVar()
+        entry = ttk.Entry(input_row, textvariable=self.url_var)
         entry.pack(side="left", fill="x", expand=True)
-        entry.bind("<Return>", lambda _e: self.stage_url(mode, url_var, both))
+        entry.bind("<Return>", lambda _e: self.stage_url(self.url_var))
         ttk.Button(
-            input_row, text="붙여넣기", command=lambda: self.paste_url(url_var, entry),
+            input_row, text="주소 붙여넣기",
+            command=lambda: self.paste_url(self.url_var, entry),
             style="Action.TButton", width=16
         ).pack(side="left", padx=(8, 0))
-        self.bind_entry_menu(entry, url_var)
+        self.bind_entry_menu(entry, self.url_var)
 
-        save_label = "저장 위치"
-        folder = tk.StringVar(value=self.settings.get(
-            "last_mp3_dir" if mode == "mp3" else "last_video_dir", str(Path.home())
-        ))
-        folder_row = ttk.Frame(tab)
-        folder_row.pack(fill="x", pady=(2, 0))
-        ttk.Label(folder_row, text=save_label + ":").pack(side="left")
-        ttk.Label(folder_row, textvariable=folder, foreground="#555").pack(side="left", padx=6)
-        folder_actions = ttk.Frame(folder_row)
-        folder_actions.pack(side="right")
+        self.mp3_folder = tk.StringVar(value=self.settings.get("last_mp3_dir", str(Path.home() / "Music")))
+        self.video_folder = tk.StringVar(value=self.settings.get("last_video_dir", str(Path.home() / "Videos")))
+
+        mp3_row = ttk.Frame(panel)
+        mp3_row.pack(fill="x", pady=(2, 2))
+        ttk.Label(mp3_row, text="MP3 저장 위치:").pack(side="left")
+        ttk.Label(mp3_row, textvariable=self.mp3_folder, foreground="#555").pack(side="left", padx=6)
         ttk.Button(
-            folder_actions, text="변경", command=lambda: self.choose_folder(mode, folder),
+            mp3_row, text="변경",
+            command=lambda: self.choose_folder("mp3", self.mp3_folder),
             style="Utility.TButton", width=10
-        ).pack(side="left")
+        ).pack(side="right")
+
+        video_row = ttk.Frame(panel)
+        video_row.pack(fill="x", pady=(2, 2))
+        ttk.Label(video_row, text="동영상 저장 위치:").pack(side="left")
+        ttk.Label(video_row, textvariable=self.video_folder, foreground="#555").pack(side="left", padx=6)
         ttk.Button(
-            folder_actions, text="다운로드 시작", command=lambda: self.start_current(mode, url_var, both),
-            style="Action.TButton", width=16
-        ).pack(side="left", padx=(8, 0), pady=2)
+            video_row, text="변경",
+            command=lambda: self.choose_folder("video", self.video_folder),
+            style="Utility.TButton", width=10
+        ).pack(side="right")
 
-        if mode == "mp3":
-            self.mp3_folder = folder
-            self.mp3_url = url_var
-        else:
-            self.video_folder = folder
-            self.video_url = url_var
+        action_row = ttk.Frame(panel)
+        action_row.pack(fill="x", pady=(5, 0))
+        ttk.Button(
+            action_row, text="다운로드 시작",
+            command=self.start_current, style="Action.TButton", width=16
+        ).pack(side="right")
 
-
-        # Register only the standard formats supported reliably by tkdnd.
-        # Register the tab and its main child surfaces as well as the root window.
-        for widget in (tab, options, input_row, entry, folder_row):
-            self.register_drop_target(
-                widget,
-                lambda e, m=mode, b=both, v=url_var: self.handle_drop(e, m, b, v)
-            )
-        if self.dnd_error:
-            ttk.Label(tab, text="드래그 앤 드롭 초기화 오류: " + self.dnd_error,
-                      foreground="#b51f32").pack(anchor="w", pady=(4, 0))
-
-    def register_drop_target(self, widget, callback):
-        try:
-            # 브라우저 주소창/링크 드래그는 파일 드롭과 다른 형식으로 전달될 수 있습니다.
-            # DND_ALL로 URI 목록, HTML, 일반 텍스트 등 다양한 드롭 형식을 받습니다.
-            from tkinterdnd2 import DND_ALL
-            widget.drop_target_register(DND_ALL)
-            widget.dnd_bind("<<Drop>>", callback)
-            return True
-        except Exception as exc:
-            # DND_ALL 등록이 지원되지 않는 환경에서는 파일/텍스트 형식으로 대체합니다.
-            try:
-                from tkinterdnd2 import DND_FILES, DND_TEXT
-                widget.drop_target_register(DND_FILES, DND_TEXT)
-                widget.dnd_bind("<<Drop>>", callback)
-                return True
-            except Exception as fallback_exc:
-                self.dnd_error = f"{exc}; 대체 등록 실패: {fallback_exc}"
-                return False
+        for widget in (panel, options, input_row, entry, mp3_row, video_row):
+            self.register_drop_target(widget, lambda e, v=self.url_var: self.handle_drop(e, v))
 
     def handle_window_drop(self, event):
-        # A drop on blank space uses the currently selected tab's settings.
-        selected = self.tabs.select()
-        context = next(
-            (value for tab, value in self.drop_contexts.items() if str(tab) == selected),
-            None
-        )
-        if context is None:
-            return "break"
-        mode, both, url_var = context
-        return self.handle_drop(event, mode, both, url_var)
+        return self.handle_drop(event, self.url_var)
 
     def choose_folder(self, mode, folder_var):
         selected = filedialog.askdirectory(parent=self.root, initialdir=folder_var.get() or str(Path.home()))
@@ -395,7 +238,7 @@ class EasySaveApp:
         try:
             value = self.root.clipboard_get().strip()
         except tk.TclError:
-            messagebox.showinfo("붙여넣기", "클립보드에 주소가 없습니다.", parent=self.root)
+            messagebox.showinfo("주소 붙여넣기", "클립보드에 주소가 없습니다.", parent=self.root)
             return
         url_var.set(value)
         entry.focus_set()
@@ -414,13 +257,23 @@ class EasySaveApp:
         entry.bind("<Control-V>", lambda e: (self.paste_url(url_var, entry), "break")[1])
         entry.bind("<Shift-Insert>", lambda e: (self.paste_url(url_var, entry), "break")[1])
 
-    def stage_url(self, mode, url_var, both=None):
+    def selected_outputs(self):
+        outputs = []
+        if self.mp3_var.get():
+            outputs.append("mp3")
+        if self.video_var.get():
+            outputs.append("video")
+        return outputs
+
+    def stage_url(self, url_var):
         url = url_var.get().strip()
         if not is_url(url):
             messagebox.showwarning("주소 확인", "http:// 또는 https://로 시작하는 주소를 입력해 주세요.", parent=self.root)
             return
-        include_other = bool(both.get()) if both is not None else False
-        outputs = ["mp3", "video"] if include_other else [mode]
+        outputs = self.selected_outputs()
+        if not outputs:
+            messagebox.showwarning("다운로드 형식 선택", "MP3 또는 동영상 중 하나 이상 선택해 주세요.", parent=self.root)
+            return
         self.enqueue(url, "url", outputs)
 
     def add_files(self, mode, url_var=None):
@@ -436,50 +289,50 @@ class EasySaveApp:
             else:
                 messagebox.showwarning("지원하지 않는 파일", f"지원하지 않는 미디어 파일입니다.\n{filename}", parent=self.root)
 
-    def handle_drop(self, event, mode, both, url_var):
+    def handle_drop(self, event, url_var):
         raw_data = html.unescape(str(event.data or "")).strip()
 
         # Browser drag formats differ: plain text, URI list, CF_HTML, or URL + title.
-        if self.browser_drag_var.get():
-            candidates = []
-            candidates.extend(re.findall(
-                r"""(?i)href\s*=\s*["']([^"']+)["']""", raw_data
-            ))
-            candidates.extend(re.findall(
-                r"""(?i)(?:SourceURL|URL)\s*:\s*(https?://[^\s]+)""", raw_data
-            ))
-            candidates.extend(re.findall(
-                r"""https?://[^\s<>"']+""", raw_data, flags=re.IGNORECASE
-            ))
+        # Accept title-link drags unconditionally; no browser extension is required.
+    candidates = []
+        candidates.extend(re.findall(
+            r"""(?i)href\s*=\s*["']([^"']+)["']""", raw_data
+        ))
+        candidates.extend(re.findall(
+            r"""(?i)(?:SourceURL|URL)\s*:\s*(https?://[^\s]+)""", raw_data
+        ))
+        candidates.extend(re.findall(
+            r"""https?://[^\s<>"']+""", raw_data, flags=re.IGNORECASE
+        ))
+        try:
+            candidates.extend(self.root.tk.splitlist(event.data))
+        except Exception:
+            pass
+
+        cleaned = []
+        for candidate in candidates:
+            value = html.unescape(str(candidate)).strip().strip(" \t\r\n\\\"'<>(),;")
+            value = value.splitlines()[0].strip() if value else ""
+            value = value.rstrip(".,;)")
+            if is_url(value) and value not in cleaned:
+                cleaned.append(value)
+
+        # Prefer the YouTube page URL over a thumbnail/image URL.
+        selected = next(
+            (u for u in cleaned if re.search(
+                r"(?i)^https?://(?:(?:www|m)\.)?(?:youtube\.com|youtu\.be)/", u
+            )),
+            cleaned[0] if cleaned else None
+        )
+        if selected:
+            url_var.set(selected)
             try:
-                candidates.extend(self.root.tk.splitlist(event.data))
+                event.widget.focus_set()
+                if isinstance(event.widget, ttk.Entry):
+                    event.widget.icursor(tk.END)
             except Exception:
                 pass
-
-            cleaned = []
-            for candidate in candidates:
-                value = html.unescape(str(candidate)).strip().strip(" \t\r\n\\\"'<>(),;")
-                value = value.splitlines()[0].strip() if value else ""
-                value = value.rstrip(".,;)")
-                if is_url(value) and value not in cleaned:
-                    cleaned.append(value)
-
-            # Prefer the YouTube page URL over a thumbnail/image URL.
-            selected = next(
-                (u for u in cleaned if re.search(
-                    r"(?i)^https?://(?:(?:www|m)\.)?(?:youtube\.com|youtu\.be)/", u
-                )),
-                cleaned[0] if cleaned else None
-            )
-            if selected:
-                url_var.set(selected)
-                try:
-                    event.widget.focus_set()
-                    if isinstance(event.widget, ttk.Entry):
-                        event.widget.icursor(tk.END)
-                except Exception:
-                    pass
-                return "break"
+            return "break"
 
         try:
             dropped = self.root.tk.splitlist(event.data)
@@ -493,29 +346,30 @@ class EasySaveApp:
         ]
         if media_files:
             url_var.set(media_files[0] if len(media_files) == 1 else f"{len(media_files)}개 파일 선택")
+            outputs = self.selected_outputs() or ["mp3"]
             for filename in media_files:
-                self.enqueue(filename, "local", ["mp3"])
+                self.enqueue(filename, "local", outputs)
             return "break"
 
-        if self.browser_drag_var.get():
-            messagebox.showinfo(
-                "주소 자동 입력",
-                "드롭한 항목에서 웹 주소를 찾지 못했습니다.\n\n"
-                "유튜브 영상 화면 자체가 아니라 영상 제목이나 공유 링크를 드래그해 "
-                "주소 입력란에 놓아 주세요. 브라우저가 영상 화면 드래그에 주소를 "
-                "제공하지 않는 경우에는 주소 자동 입력이 불가능합니다.",
-                parent=self.root
-            )
+        messagebox.showinfo(
+            "주소 자동 입력",
+            "드롭한 항목에서 웹 주소를 찾지 못했습니다.\n\n"
+            "유튜브 동영상 화면이 아니라 동영상 제목을 드래그해 놓아 주세요.",
+            parent=self.root
+        )
         return "break"
 
-    def start_current(self, mode, url_var, both):
-        value = url_var.get().strip()
+    def start_current(self):
+        value = self.url_var.get().strip()
         if value:
             if not is_url(value):
                 messagebox.showwarning("주소 확인", "올바른 http:// 또는 https:// 주소를 입력해 주세요.", parent=self.root)
                 return
-            self.stage_url(mode, url_var, both)
-            url_var.set("")
+            if not self.selected_outputs():
+                messagebox.showwarning("다운로드 형식 선택", "MP3 또는 동영상 중 하나 이상 선택해 주세요.", parent=self.root)
+                return
+            self.stage_url(self.url_var)
+            self.url_var.set("")
         self.start_pending()
 
     def start_pending(self):
