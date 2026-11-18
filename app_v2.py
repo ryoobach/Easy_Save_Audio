@@ -86,7 +86,12 @@ class EasySaveApp:
         self.executor = ThreadPoolExecutor(max_workers=2, thread_name_prefix="media-job")
         self.ffmpeg = ffmpeg_path()
         self.closing = False
+        self.drop_contexts = {}
+        self.dnd_error = None
         self.build_ui()
+        # The root window is also a drop target, so files/links can be dropped
+        # anywhere in the application, not only on the URL entry or tab frame.
+        self.register_drop_target(self.root, self.handle_window_drop)
         self.root.protocol("WM_DELETE_WINDOW", self.on_close)
         self.root.after(100, self.poll_events)
 
@@ -202,6 +207,7 @@ class EasySaveApp:
         input_row.pack(fill="x", pady=(0, 12))
         ttk.Label(input_row, text="주소", font=("Malgun Gothic", 11)).pack(side="left", padx=(0, 32))
         url_var = tk.StringVar()
+        self.drop_contexts[tab] = (mode, both, url_var)
         entry = ttk.Entry(input_row, textvariable=url_var)
         entry.pack(side="left", fill="x", expand=True)
         entry.bind("<Return>", lambda _e: self.stage_url(mode, url_var, both))
@@ -242,28 +248,38 @@ class EasySaveApp:
             foreground="#777"
         ).pack(anchor="w", pady=(8, 0))
 
-        # Register browser payload formats as well as Windows file drops.
+        # Register only the standard formats supported reliably by tkdnd.
+        # Register the tab and its main child surfaces as well as the root window.
+        for widget in (tab, options, input_row, entry, folder_row):
+            self.register_drop_target(
+                widget,
+                lambda e, m=mode, b=both, v=url_var: self.handle_drop(e, m, b, v)
+            )
+        if self.dnd_error:
+            ttk.Label(tab, text="드래그 앤 드롭 초기화 오류: " + self.dnd_error,
+                      foreground="#b51f32").pack(anchor="w", pady=(4, 0))
+
+    def register_drop_target(self, widget, callback):
         try:
-            import tkinterdnd2 as tkdnd
-            drop_types = [
-                getattr(tkdnd, "DND_FILES", "DND_Files"),
-                getattr(tkdnd, "DND_TEXT", "DND_Text"),
-                getattr(tkdnd, "DND_HTML", "DND_HTML"),
-                getattr(tkdnd, "DND_URL", "DND_URL"),
-            ]
-            for widget in (tab, entry):
-                try:
-                    widget.drop_target_register(*drop_types)
-                except Exception:
-                    widget.drop_target_register(
-                        getattr(tkdnd, "DND_FILES", "DND_Files"),
-                        getattr(tkdnd, "DND_TEXT", "DND_Text")
-                    )
-                widget.dnd_bind("<<Drop>>", lambda e, m=mode, b=both, v=url_var: self.handle_drop(e, m, b, v))
+            from tkinterdnd2 import DND_FILES, DND_TEXT
+            widget.drop_target_register(DND_FILES, DND_TEXT)
+            widget.dnd_bind("<<Drop>>", callback)
+            return True
         except Exception as exc:
             self.dnd_error = str(exc)
-            ttk.Label(tab, text="드래그 앤 드롭을 사용할 수 없습니다. 초기화 상태를 확인해 주세요.",
-                      foreground="#b51f32").pack(anchor="w", pady=(4, 0))
+            return False
+
+    def handle_window_drop(self, event):
+        # A drop on blank space uses the currently selected tab's settings.
+        selected = self.tabs.select()
+        context = next(
+            (value for tab, value in self.drop_contexts.items() if str(tab) == selected),
+            None
+        )
+        if context is None:
+            return "break"
+        mode, both, url_var = context
+        return self.handle_drop(event, mode, both, url_var)
 
     def choose_folder(self, mode, folder_var):
         selected = filedialog.askdirectory(parent=self.root, initialdir=folder_var.get() or str(Path.home()))
