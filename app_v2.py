@@ -168,7 +168,6 @@ class EasySaveApp:
         both = tk.BooleanVar(value=False)
         other_label = "동영상" if mode == "mp3" else "MP3"
         option_group = ttk.Frame(options)
-        option_group.pack(anchor="w")
         ttk.Checkbutton(option_group, text=other_label, variable=both).pack(side="left", padx=(0, 18))
         self.browser_drag_var = getattr(self, "browser_drag_var", tk.BooleanVar(value=False))
         ttk.Checkbutton(
@@ -195,7 +194,9 @@ class EasySaveApp:
                 group_left = tab_right_root - options.winfo_rootx() - option_group.winfo_reqwidth()
                 option_group.place(x=max(0, group_left), y=0)
             except Exception:
-                option_group.pack_configure(anchor="w")
+                option_group.place(x=0, y=0)
+
+        self.root.after_idle(align_option_group)
 
         input_row = ttk.Frame(tab)
         input_row.pack(fill="x", pady=(0, 12))
