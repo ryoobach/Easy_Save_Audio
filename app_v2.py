@@ -126,7 +126,10 @@ class EasySaveApp:
             ttk.Label(title_row, image=self.header_image).pack(side="left", padx=(0, 10), pady=(1, 0))
         ttk.Label(title_row, text=APP_NAME, font=("Malgun Gothic", 18, "bold")).pack(side="left")
         ttk.Label(title_row, text=APP_VERSION, font=("Segoe UI", 11, "bold"), foreground="#b51f32").pack(side="left", padx=(10, 0))
-        ttk.Button(title_row, text="ⓘ", command=self.show_about, style="About.TButton", width=3).pack(side="left", padx=(10, 0), pady=2)
+        # 앱 정보 버튼은 기준 이미지처럼 창 상단 오른쪽에 배치합니다.
+        ttk.Button(header, text="?", command=self.show_about, style="About.TButton", width=3).pack(
+            side="right", anchor="n", padx=(10, 0), pady=(20, 0)
+        )
 
         self.tabs = ttk.Notebook(title_area)
         # 탭 박스가 아래 작업 목록 영역과 같은 가로 폭을 사용하도록 확장합니다.
