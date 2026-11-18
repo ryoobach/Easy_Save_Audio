@@ -16,14 +16,22 @@ jobs:
         run: python -m pip install -r requirements.txt
       - name: Create application icon
         run: python make_icon.py
-      - name: Build portable EXE
+      - name: Build portable EXE and versioned ZIP
+        id: build
         shell: pwsh
         run: |
+          $versionMatch = Select-String -Path app_v2.py -Pattern '^APP_VERSION = "([^"]+)"'
+          if (-not $versionMatch) { throw "APP_VERSION was not found in app_v2.py" }
+          $version = $versionMatch.Matches[0].Groups[1].Value
+          "version=$version" >> $env:GITHUB_OUTPUT
           $ffmpeg = python -c "import imageio_ffmpeg; print(imageio_ffmpeg.get_ffmpeg_exe())"
           python -m PyInstaller --noconfirm --clean --onefile --windowed --name EasySaveAudioVideo --icon easy_save_audio.ico --add-data "easy_save_audio.png;." --add-data "easy_save_audio.ico;." --add-binary "$ffmpeg;." --collect-all yt_dlp --collect-all tkinterdnd2 app_v2.py
-      - name: Upload portable EXE
+          $zipName = "Easy_Save_Audio_Video_v$($version)_Windows_x64.zip"
+          Compress-Archive -Path dist/EasySaveAudioVideo.exe -DestinationPath "dist/$zipName" -Force
+          Write-Host "Created dist/$zipName"
+      - name: Upload versioned Windows ZIP
         uses: actions/upload-artifact@v4
         with:
-          name: Easy-Save-Audio-Video-Windows-x64
-          path: dist/EasySaveAudioVideo.exe
+          name: Easy-Save-Audio-Video-v${{ steps.build.outputs.version }}-Windows-x64
+          path: dist/Easy_Save_Audio_Video_v${{ steps.build.outputs.version }}_Windows_x64.zip
           if-no-files-found: error
