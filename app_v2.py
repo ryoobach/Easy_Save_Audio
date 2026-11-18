@@ -23,7 +23,7 @@ except ImportError:
     TkinterDnD = None
 
 APP_NAME = "Easy Save Audio & Video"
-APP_VERSION = "2.0.4"
+APP_VERSION = "2.0.5"
 APPDATA = Path(os.environ.get("APPDATA", str(Path.home()))) / "EasySaveAudio"
 APPDATA.mkdir(parents=True, exist_ok=True)
 SETTINGS_FILE = APPDATA / "settings.json"
@@ -125,7 +125,7 @@ class EasySaveApp:
         title_row.pack(anchor="w", fill="x")
         ttk.Label(title_row, text=APP_NAME, font=("Malgun Gothic", 18, "bold")).pack(side="left")
         ttk.Label(title_row, text=APP_VERSION, font=("Segoe UI", 11, "bold"), foreground="#b51f32").pack(side="left", padx=(10, 0))
-        ttk.Button(header, text="ⓘ", command=self.show_about, style="About.TButton", width=3).pack(side="right", padx=(10, 0), pady=2)
+        ttk.Button(title_row, text="ⓘ", command=self.show_about, style="About.TButton", width=3).pack(side="left", padx=(10, 0), pady=2)
 
         self.tabs = ttk.Notebook(title_area)
         self.tabs.pack(anchor="w", fill="x", pady=(3, 0))
