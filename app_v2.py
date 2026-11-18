@@ -407,8 +407,9 @@ class EasySaveApp:
                "cancel": threading.Event(), "status": "대기 중", "progress": 0,
                "started": time.time(), "submitted": False}
         self.jobs[job_id] = job
-        self.tree.insert("", "end", iid=job_id, values=(name, kind, "대기 중", "0%"))
-        self.tree.see(job_id)
+        # 최신 등록 작업을 항상 목록 맨 위에 표시합니다.
+        self.tree.insert("", 0, iid=job_id, values=(name, kind, "대기 중", "0%"))
+        self.tree.yview_moveto(0)
         # Queue only; execution starts after the user presses [변환 시작].
 
     def emit(self, job_id, status=None, progress=None, detail=None):
