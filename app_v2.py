@@ -16,7 +16,6 @@ from pathlib import Path
 import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
 
-import imageio_ffmpeg
 import yt_dlp
 try:
     from tkinterdnd2 import TkinterDnD
@@ -24,7 +23,7 @@ except ImportError:
     TkinterDnD = None
 
 APP_NAME = "Easy Save Audio & Video"
-APP_VERSION = "2.1.1"
+APP_VERSION = "2.1.2"
 APPDATA = Path(os.environ.get("APPDATA", str(Path.home()))) / "EasySaveAudio"
 APPDATA.mkdir(parents=True, exist_ok=True)
 SETTINGS_FILE = APPDATA / "settings.json"
@@ -68,6 +67,7 @@ def ffmpeg_path():
         found = list(base.glob("ffmpeg*.exe"))
         if found:
             return str(found[0])
+    import imageio_ffmpeg
     return imageio_ffmpeg.get_ffmpeg_exe()
 
 def is_url(value):
