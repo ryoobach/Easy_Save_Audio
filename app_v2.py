@@ -167,12 +167,35 @@ class EasySaveApp:
         options.pack(fill="x", pady=(0, 8))
         both = tk.BooleanVar(value=False)
         other_label = "동영상" if mode == "mp3" else "MP3"
-        ttk.Checkbutton(options, text=other_label, variable=both).pack(side="left", padx=(168, 18))
+        option_group = ttk.Frame(options)
+        option_group.pack(anchor="w")
+        ttk.Checkbutton(option_group, text=other_label, variable=both).pack(side="left", padx=(0, 18))
         self.browser_drag_var = getattr(self, "browser_drag_var", tk.BooleanVar(value=False))
         ttk.Checkbutton(
-            options, text="드래그 앤 드롭으로 주소 자동 입력",
+            option_group, text="드래그 앤 드롭으로 주소 자동 입력",
             variable=self.browser_drag_var
-        ).pack(side="left", padx=(0, 0))
+        ).pack(side="left")
+
+        # 체크박스 묶음의 오른쪽 끝을 두 번째 탭 제목("동영상 다운로드")의
+        # 오른쪽 끝과 맞춥니다. 탭/글꼴 크기가 달라져도 실제 글자 폭으로 계산합니다.
+        def align_option_group():
+            try:
+                import tkinter.font as tkfont
+                self.tabs.update_idletasks()
+                tab_font_name = ttk.Style().lookup("TNotebook.Tab", "font") or "TkDefaultFont"
+                tab_font = tkfont.nametofont(tab_font_name) if isinstance(tab_font_name, str) and tab_font_name in tkfont.names() else tkfont.Font(font=tab_font_name)
+                pad = ttk.Style().lookup("TNotebook.Tab", "padding")
+                if isinstance(pad, (tuple, list)):
+                    tab_pad = int(pad[0]) if pad else 8
+                else:
+                    tab_pad = 8
+                first_width = tab_font.measure("MP3 다운로드") + tab_pad * 2
+                second_width = tab_font.measure("동영상 다운로드") + tab_pad * 2
+                tab_right_root = self.tabs.winfo_rootx() + first_width + second_width
+                group_left = tab_right_root - options.winfo_rootx() - option_group.winfo_reqwidth()
+                option_group.place(x=max(0, group_left), y=0)
+            except Exception:
+                option_group.pack_configure(anchor="w")
 
         input_row = ttk.Frame(tab)
         input_row.pack(fill="x", pady=(0, 12))
