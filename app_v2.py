@@ -632,7 +632,52 @@ class EasySaveApp:
                                            row.get("result", ""), row.get("detail", "")))
 
     def show_about(self):
-        messagebox.showinfo("앱 정보", f"{APP_NAME}\n버전 {APP_VERSION}\nWindows 64비트\n\nRyoo jaesang & 최피디", parent=self.root)
+        win = tk.Toplevel(self.root)
+        win.title("앱 정보")
+        win.geometry("500x340")
+        win.minsize(460, 320)
+        win.transient(self.root)
+        win.resizable(False, False)
+
+        outer = ttk.Frame(win, padding=(30, 24))
+        outer.pack(fill="both", expand=True)
+
+        ttk.Label(
+            outer, text=APP_NAME,
+            font=("Malgun Gothic", 17, "bold"), wraplength=420, justify="center"
+        ).pack(fill="x", pady=(4, 8))
+        ttk.Label(
+            outer, text=f"버전 {APP_VERSION}",
+            font=("Segoe UI", 12, "bold"), foreground="#b51f32"
+        ).pack(pady=(0, 18))
+
+        details = ttk.Frame(outer)
+        details.pack(fill="x", padx=18)
+        rows = (
+            ("프로그램", APP_NAME),
+            ("버전", APP_VERSION),
+            ("플랫폼", "Windows 64비트"),
+            ("개발 시작일", "2026년 11월 18일"),
+        )
+        for label, value in rows:
+            row = ttk.Frame(details)
+            row.pack(fill="x", pady=6)
+            ttk.Label(row, text=label, width=14, font=("Malgun Gothic", 10, "bold")).pack(side="left")
+            ttk.Label(row, text=value, font=("Malgun Gothic", 10)).pack(side="left")
+
+        ttk.Separator(outer).pack(fill="x", pady=(16, 12))
+        ttk.Label(
+            outer, text="Ryoo jaesang & 최피디",
+            font=("Malgun Gothic", 10)
+        ).pack()
+        ttk.Button(outer, text="닫기", command=win.destroy, width=12).pack(pady=(14, 0))
+
+        win.update_idletasks()
+        x = self.root.winfo_rootx() + (self.root.winfo_width() - win.winfo_width()) // 2
+        y = self.root.winfo_rooty() + (self.root.winfo_height() - win.winfo_height()) // 2
+        win.geometry(f"+{max(0, x)}+{max(0, y)}")
+        win.grab_set()
+        win.focus_set()
 
     def on_close(self):
         self.closing = True
