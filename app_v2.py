@@ -134,8 +134,8 @@ class EasySaveApp:
         queue_header = ttk.Frame(outer)
         queue_header.pack(fill="x", pady=(4, 6))
         ttk.Label(queue_header, text="작업 목록", font=("Malgun Gothic", 12, "bold")).pack(side="left")
-        ttk.Label(queue_header, text="동시 실행 2개", foreground="#666").pack(side="left", padx=(16, 0))
         ttk.Button(queue_header, text="완료 작업 지우기", command=self.clear_completed, style="Utility.TButton", width=16).pack(side="right")
+        ttk.Label(queue_header, text="동시 실행 2개", foreground="#666").pack(side="right", padx=12)
 
         columns = ("source", "kind", "status", "progress")
         queue_area = ttk.Frame(outer)
@@ -167,7 +167,7 @@ class EasySaveApp:
         options.pack(fill="x", pady=(0, 8))
         both = tk.BooleanVar(value=False)
         other_label = "동영상" if mode == "mp3" else "MP3"
-        ttk.Checkbutton(options, text=other_label, variable=both).pack(side="left", padx=(86, 18))
+        ttk.Checkbutton(options, text=other_label, variable=both).pack(side="left", padx=(168, 18))
         self.browser_drag_var = getattr(self, "browser_drag_var", tk.BooleanVar(value=False))
         ttk.Checkbutton(
             options, text="드래그 앤 드롭으로 주소 자동 입력",
@@ -176,7 +176,7 @@ class EasySaveApp:
 
         input_row = ttk.Frame(tab)
         input_row.pack(fill="x", pady=(0, 12))
-        ttk.Label(input_row, text="주소", font=("Malgun Gothic", 11)).pack(side="left", padx=(0, 22))
+        ttk.Label(input_row, text="주소", font=("Malgun Gothic", 11)).pack(side="left", padx=(0, 32))
         url_var = tk.StringVar()
         entry = ttk.Entry(input_row, textvariable=url_var)
         entry.pack(side="left", fill="x", expand=True)
