@@ -207,6 +207,8 @@ class EasySaveApp:
                 option_group.place(x=0, y=0)
 
         self.root.after_idle(align_option_group)
+        # 숨겨진 탭은 좌표가 확정되지 않을 수 있으므로 탭을 선택할 때도 다시 정렬합니다.
+        self.tabs.bind("<<NotebookTabChanged>>", lambda _event: self.root.after_idle(align_option_group), add="+")
 
         input_row = ttk.Frame(tab)
         input_row.pack(fill="x", pady=(0, 12))
