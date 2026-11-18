@@ -287,15 +287,15 @@ class EasySaveApp:
         if self.browser_drag_var.get():
             candidates = []
             candidates.extend(re.findall(
-                r'''(?i)href\\s*=\\s*["']([^"']+)["']''', raw_data
+                r"""(?i)href\s*=\s*["']([^"']+)["']""", raw_data
             ))
-            candidates.extend(re.findall(r'https?://[^\\s<>"']+', raw_data, flags=re.IGNORECASE))
+            candidates.extend(re.findall(r"""https?://[^\s<>"']+""", raw_data, flags=re.IGNORECASE))
             try:
                 candidates.extend(self.root.tk.splitlist(event.data))
             except Exception:
                 pass
             for candidate in candidates:
-                candidate = html.unescape(str(candidate)).strip().strip('\\\"\\\'<>(),;')
+                candidate = html.unescape(str(candidate)).strip().strip("\\\"'<>(),;")
                 if is_url(candidate):
                     url_var.set(candidate)
                     entry = event.widget if isinstance(event.widget, ttk.Entry) else None
