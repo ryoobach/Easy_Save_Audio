@@ -176,7 +176,7 @@ class EasySaveApp:
         button_row = ttk.Frame(tab)
         button_row.pack(fill="x")
         ttk.Button(button_row, text="파일 선택", command=lambda: self.add_files(mode, url_var)).pack(side="left")
-        ttk.Button(button_row, text="변환 시작", command=self.start_pending).pack(side="left", padx=8)
+        ttk.Button(button_row, text="변환 시작", command=lambda: self.start_current(mode, url_var, both)).pack(side="left", padx=8)
         folder = tk.StringVar(value=self.settings.get("last_mp3_dir" if mode == "mp3" else "last_video_dir", str(Path.home())))
         folder_row = ttk.Frame(tab)
         folder_row.pack(fill="x", pady=(10, 0))
@@ -190,8 +190,8 @@ class EasySaveApp:
         ttk.Label(tab, text="파일을 이 영역으로 드래그해 추가할 수도 있습니다(Windows 파일 드롭 지원).",
                   foreground="#777").pack(anchor="w", pady=(8, 0))
         try:
-            from tkinterdnd2 import DND_FILES
-            tab.drop_target_register(DND_FILES)
+            from tkinterdnd2 import DND_FILES, DND_TEXT
+            tab.drop_target_register(DND_FILES, DND_TEXT)
             tab.dnd_bind("<<Drop>>", lambda e: self.handle_drop(e, mode, both, url_var))
         except Exception:
             pass
@@ -278,21 +278,25 @@ class EasySaveApp:
             else:
                 messagebox.showwarning("지원하지 않는 파일", f"지원하지 않는 미디어 파일입니다.\n{filename}", parent=self.root)
 
+    def start_current(self, mode, url_var, both):
+        value = url_var.get().strip()
+        if value:
+            if not is_url(value):
+                messagebox.showwarning("주소 확인", "올바른 http:// 또는 https:// 주소를 입력해 주세요.", parent=self.root)
+                return
+            self.stage_url(mode, url_var, both)
+            url_var.set("")
+        self.start_pending()
+
     def start_pending(self):
         pending = [job_id for job_id, job in self.jobs.items()
                    if not job.get("submitted") and job["status"] == "대기 중"]
-        if not pending:
-            url_var = self.mp3_url if self.tabs.index(self.tabs.select()) == 0 else self.video_url
-            mode = "mp3" if self.tabs.index(self.tabs.select()) == 0 else "video"
-            if is_url(url_var.get().strip()):
-                self.stage_url(mode, url_var)
-                pending = [job_id for job_id, job in self.jobs.items() if not job.get("submitted") and job["status"] == "대기 중"]
         if not pending:
             messagebox.showinfo("변환 시작", "실행할 작업이 없습니다. 주소를 붙여넣거나 파일을 선택해 주세요.", parent=self.root)
             return
         for job_id in pending:
             self.jobs[job_id]["submitted"] = True
-            # Staged until the user presses [변환 시작].
+            self.executor.submit(self.run_job, job_id)
 
     def enqueue(self, source, source_type, outputs):
         if source_type == "local":
@@ -316,7 +320,7 @@ class EasySaveApp:
                "started": time.time(), "submitted": False}
         self.jobs[job_id] = job
         self.tree.insert("", "end", iid=job_id, values=(name, kind, "대기 중", "0%"))
-        self.executor.submit(self.run_job, job_id)
+        # Queue only; execution starts after the user presses [변환 시작].
 
     def emit(self, job_id, status=None, progress=None, detail=None):
         self.events.put((job_id, status, progress, detail))
