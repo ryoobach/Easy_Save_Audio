@@ -679,17 +679,15 @@ class EasySaveApp:
 
         details = ttk.Frame(outer)
         details.pack(fill="x", padx=18)
-        rows = (
-            ("프로그램", APP_NAME),
-            ("버전", APP_VERSION),
-            ("플랫폼", "Windows 64비트"),
-            ("개발 시작일", "2026년 11월 18일"),
-        )
-        for label, value in rows:
-            row = ttk.Frame(details)
-            row.pack(fill="x", pady=6)
-            ttk.Label(row, text=label, width=14, font=("Malgun Gothic", 10, "bold")).pack(side="left")
-            ttk.Label(row, text=value, font=("Malgun Gothic", 10)).pack(side="left")
+        # 앱 이름과 버전은 위쪽에 이미 표시하므로 중복 항목은 생략합니다.
+        ttk.Label(
+            details, text="Windows 64비트",
+            font=("Malgun Gothic", 10)
+        ).pack(anchor="w", pady=6)
+        ttk.Label(
+            details, text="2026년 11월 18일",
+            font=("Malgun Gothic", 10)
+        ).pack(anchor="w", pady=6)
 
         ttk.Separator(outer).pack(fill="x", pady=(16, 12))
         ttk.Label(
