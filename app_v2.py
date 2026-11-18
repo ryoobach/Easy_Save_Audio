@@ -97,8 +97,8 @@ class EasySaveApp:
         except tk.TclError:
             pass
         style.configure("Utility.TButton", padding=(10, 6))
-        style.configure("About.TButton", padding=(10, 6))
-        style.configure("Start.TButton", padding=(16, 10), font=("Malgun Gothic", 10, "bold"))
+        style.configure("About.TButton", padding=(6, 6))
+        style.configure("Start.TButton", padding=(10, 6), font=("Malgun Gothic", 10, "bold"))
         outer = ttk.Frame(self.root, padding=(18, 14))
         outer.pack(fill="both", expand=True)
 
@@ -120,7 +120,7 @@ class EasySaveApp:
         title_row.pack(anchor="w", fill="x")
         ttk.Label(title_row, text=APP_NAME, font=("Malgun Gothic", 18, "bold")).pack(side="left")
         ttk.Label(title_row, text=APP_VERSION, font=("Segoe UI", 11, "bold"), foreground="#b51f32").pack(side="left", padx=(10, 0))
-        ttk.Button(header, text="앱 정보", command=self.show_about, style="Utility.TButton", width=16).pack(side="right", padx=(10, 0), pady=2)
+        ttk.Button(header, text="ⓘ", command=self.show_about, style="About.TButton", width=3).pack(side="right", padx=(10, 0), pady=2)
 
         self.tabs = ttk.Notebook(title_area)
         self.tabs.pack(anchor="w", fill="x", pady=(3, 0))
@@ -134,8 +134,8 @@ class EasySaveApp:
         queue_header = ttk.Frame(outer)
         queue_header.pack(fill="x", pady=(4, 6))
         ttk.Label(queue_header, text="작업 목록", font=("Malgun Gothic", 12, "bold")).pack(side="left")
+        ttk.Label(queue_header, text="동시 실행 2개", foreground="#666").pack(side="right", padx=(12, 12))
         ttk.Button(queue_header, text="완료 작업 지우기", command=self.clear_completed, style="Utility.TButton", width=16).pack(side="right")
-        ttk.Label(queue_header, text="동시 실행 2개", foreground="#666").pack(side="right", padx=12)
 
         columns = ("source", "kind", "status", "progress")
         queue_area = ttk.Frame(outer)
@@ -183,7 +183,7 @@ class EasySaveApp:
         entry.bind("<Return>", lambda _e: self.stage_url(mode, url_var, both))
         ttk.Button(
             input_row, text="붙여넣기", command=lambda: self.paste_url(url_var, entry),
-            style="Utility.TButton", width=10
+            style="Utility.TButton", width=16
         ).pack(side="left", padx=(8, 0))
         self.bind_entry_menu(entry, url_var)
 
