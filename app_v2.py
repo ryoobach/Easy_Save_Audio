@@ -151,9 +151,13 @@ class EasySaveApp:
         url_row.pack(fill="x")
         ttk.Label(url_row, text="인터넷 주소").pack(side="left")
         url_var = tk.StringVar()
-        entry = ttk.Entry(tab, textvariable=url_var)
-        entry.pack(fill="x", pady=(5, 9))
-        entry.bind("<Return>", lambda _e: self.add_url(mode, url_var))
+        input_row = ttk.Frame(tab)
+        input_row.pack(fill="x", pady=(5, 9))
+        entry = ttk.Entry(input_row, textvariable=url_var)
+        entry.pack(side="left", fill="x", expand=True)
+        entry.bind("<Return>", lambda _e: self.stage_url(mode, url_var, both))
+        ttk.Button(input_row, text="붙여넣기", command=lambda: self.paste_url(url_var, entry)).pack(side="left", padx=(8, 0))
+        self.bind_entry_menu(entry, url_var)
         options = ttk.Frame(tab)
         options.pack(fill="x", pady=(0, 8))
         if mode == "mp3":
@@ -166,10 +170,13 @@ class EasySaveApp:
             ttk.Label(options, text="기본 작업: 동영상 다운로드").pack(side="left")
             ttk.Checkbutton(options, text="MP3도 함께 다운로드", variable=both).pack(side="left", padx=18)
             save_label = "동영상 저장 폴더"
+        self.browser_drag_var = getattr(self, "browser_drag_var", tk.BooleanVar(value=False))
+        ttk.Checkbutton(options, text="브라우저 영상 드래그 앤 드롭으로 주소 자동 입력",
+                        variable=self.browser_drag_var).pack(side="left", padx=(18, 0))
         button_row = ttk.Frame(tab)
         button_row.pack(fill="x")
-        ttk.Button(button_row, text="URL 작업 추가", command=lambda: self.add_url(mode, url_var, both)).pack(side="left")
-        ttk.Button(button_row, text="파일 선택 / 일괄 추가", command=lambda: self.add_files(mode, both)).pack(side="left", padx=8)
+        ttk.Button(button_row, text="파일 선택", command=lambda: self.add_files(mode, url_var)).pack(side="left")
+        ttk.Button(button_row, text="변환 시작", command=self.start_pending).pack(side="left", padx=8)
         folder = tk.StringVar(value=self.settings.get("last_mp3_dir" if mode == "mp3" else "last_video_dir", str(Path.home())))
         folder_row = ttk.Frame(tab)
         folder_row.pack(fill="x", pady=(10, 0))
@@ -185,7 +192,7 @@ class EasySaveApp:
         try:
             from tkinterdnd2 import DND_FILES
             tab.drop_target_register(DND_FILES)
-            tab.dnd_bind("<<Drop>>", lambda e: self.handle_drop(e, mode, both))
+            tab.dnd_bind("<<Drop>>", lambda e: self.handle_drop(e, mode, both, url_var))
         except Exception:
             pass
         if mode == "mp3":
@@ -201,7 +208,30 @@ class EasySaveApp:
             self.settings[key] = selected
             save_settings(self.settings)
 
-    def add_url(self, mode, url_var, both=None):
+    def paste_url(self, url_var, entry):
+        try:
+            value = self.root.clipboard_get().strip()
+        except tk.TclError:
+            messagebox.showinfo("붙여넣기", "클립보드에 주소가 없습니다.", parent=self.root)
+            return
+        url_var.set(value)
+        entry.focus_set()
+        entry.icursor(tk.END)
+
+    def bind_entry_menu(self, entry, url_var):
+        menu = tk.Menu(entry, tearoff=0)
+        menu.add_command(label="잘라내기", command=lambda: entry.event_generate("<<Cut>>"))
+        menu.add_command(label="복사", command=lambda: entry.event_generate("<<Copy>>"))
+        menu.add_command(label="붙여넣기", command=lambda: self.paste_url(url_var, entry))
+        menu.add_separator()
+        menu.add_command(label="모두 선택", command=lambda: (entry.select_range(0, tk.END), entry.icursor(tk.END)))
+        menu.add_command(label="삭제", command=lambda: url_var.set(""))
+        entry.bind("<Button-3>", lambda e: (menu.tk_popup(e.x_root, e.y_root), "break"))
+        entry.bind("<Control-v>", lambda e: (self.paste_url(url_var, entry), "break")[1])
+        entry.bind("<Control-V>", lambda e: (self.paste_url(url_var, entry), "break")[1])
+        entry.bind("<Shift-Insert>", lambda e: (self.paste_url(url_var, entry), "break")[1])
+
+    def stage_url(self, mode, url_var, both=None):
         url = url_var.get().strip()
         if not is_url(url):
             messagebox.showwarning("주소 확인", "http:// 또는 https://로 시작하는 주소를 입력해 주세요.", parent=self.root)
@@ -209,27 +239,60 @@ class EasySaveApp:
         include_other = bool(both.get()) if both is not None else False
         outputs = ["mp3", "video"] if include_other else [mode]
         self.enqueue(url, "url", outputs)
-        url_var.set("")
 
-    def add_files(self, mode, both=None):
+    def add_files(self, mode, url_var=None):
         files = filedialog.askopenfilenames(parent=self.root, title="미디어 파일 선택")
         if not files:
             return
-        include_other = bool(both.get()) if both is not None else False
-        outputs = ["mp3", "video"] if include_other else [mode]
+        if url_var is not None:
+            url_var.set(files[0] if len(files) == 1 else f"{len(files)}개 파일 선택")
         for filename in files:
-            self.enqueue(filename, "local", outputs)
+            ext = Path(filename).suffix.lower()
+            if ext in VIDEO_EXTENSIONS or ext in AUDIO_EXTENSIONS:
+                self.enqueue(filename, "local", ["mp3"])
+            else:
+                messagebox.showwarning("지원하지 않는 파일", f"지원하지 않는 미디어 파일입니다.\n{filename}", parent=self.root)
 
-    def handle_drop(self, event, mode, both):
+    def handle_drop(self, event, mode, both, url_var):
+        data = str(event.data).strip()
+        if is_url(data):
+            if self.browser_drag_var.get():
+                url_var.set(data)
+            return
         try:
-            files = self.root.tk.splitlist(event.data)
+            dropped = self.root.tk.splitlist(event.data)
         except Exception:
-            files = [event.data]
-        outputs = ["mp3", "video"] if both.get() else [mode]
+            dropped = [event.data]
+        files = [str(item).strip() for item in dropped if str(item).strip()]
+        if not files:
+            return
+        url_var.set(files[0] if len(files) == 1 else f"{len(files)}개 파일 선택")
         for filename in files:
-            filename = str(filename).strip()
-            if filename:
-                self.enqueue(filename, "url" if is_url(filename) else "local", outputs)
+            if is_url(filename):
+                if self.browser_drag_var.get():
+                    url_var.set(filename)
+                continue
+            ext = Path(filename).suffix.lower()
+            if ext in VIDEO_EXTENSIONS or ext in AUDIO_EXTENSIONS:
+                self.enqueue(filename, "local", ["mp3"])
+            else:
+                messagebox.showwarning("지원하지 않는 파일", f"지원하지 않는 미디어 파일입니다.\n{filename}", parent=self.root)
+
+    def start_pending(self):
+        pending = [job_id for job_id, job in self.jobs.items()
+                   if not job.get("submitted") and job["status"] == "대기 중"]
+        if not pending:
+            url_var = self.mp3_url if self.tabs.index(self.tabs.select()) == 0 else self.video_url
+            mode = "mp3" if self.tabs.index(self.tabs.select()) == 0 else "video"
+            if is_url(url_var.get().strip()):
+                self.stage_url(mode, url_var)
+                pending = [job_id for job_id, job in self.jobs.items() if not job.get("submitted") and job["status"] == "대기 중"]
+        if not pending:
+            messagebox.showinfo("변환 시작", "실행할 작업이 없습니다. 주소를 붙여넣거나 파일을 선택해 주세요.", parent=self.root)
+            return
+        for job_id in pending:
+            self.jobs[job_id]["submitted"] = True
+            # Staged until the user presses [변환 시작].
 
     def enqueue(self, source, source_type, outputs):
         if source_type == "local":
@@ -249,7 +312,8 @@ class EasySaveApp:
         name = Path(source).name if source_type == "local" else source
         kind = "+".join("MP3" if x == "mp3" else "동영상" for x in outputs)
         job = {"id": job_id, "source": source, "source_type": source_type, "outputs": outputs,
-               "cancel": threading.Event(), "status": "대기 중", "progress": 0, "started": time.time()}
+               "cancel": threading.Event(), "status": "대기 중", "progress": 0,
+               "started": time.time(), "submitted": False}
         self.jobs[job_id] = job
         self.tree.insert("", "end", iid=job_id, values=(name, kind, "대기 중", "0%"))
         self.executor.submit(self.run_job, job_id)
