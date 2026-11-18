@@ -16,6 +16,10 @@ from tkinter import filedialog, messagebox, ttk
 
 import imageio_ffmpeg
 import yt_dlp
+try:
+    from tkinterdnd2 import TkinterDnD
+except ImportError:
+    TkinterDnD = None
 
 APP_NAME = "Easy Save Audio & Video"
 APP_VERSION = "2.0.0"
@@ -442,6 +446,6 @@ class EasySaveApp:
         self.root.destroy()
 
 if __name__ == "__main__":
-    root = tk.Tk()
+    root = TkinterDnD.Tk() if TkinterDnD is not None else tk.Tk()
     app = EasySaveApp(root)
     root.mainloop()
