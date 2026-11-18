@@ -22,7 +22,7 @@ except ImportError:
     TkinterDnD = None
 
 APP_NAME = "Easy Save Audio & Video"
-APP_VERSION = "2.0.0"
+APP_VERSION = "2.0"
 APPDATA = Path(os.environ.get("APPDATA", str(Path.home()))) / "EasySaveAudio"
 APPDATA.mkdir(parents=True, exist_ok=True)
 SETTINGS_FILE = APPDATA / "settings.json"
@@ -34,6 +34,16 @@ def load_settings():
     try:
         data = json.loads(SETTINGS_FILE.read_text(encoding="utf-8"))
         if isinstance(data, dict):
+            # Migrate 1.x settings without discarding the user's previous MP3 folder or history.
+            if "last_mp3_dir" not in data and data.get("last_save_dir"):
+                data["last_mp3_dir"] = data["last_save_dir"]
+            data.setdefault("last_video_dir", str(Path.home() / "Videos"))
+            data.setdefault("last_mp3_dir", str(Path.home() / "Music"))
+            old_history = data.get("history", [])
+            if isinstance(old_history, list):
+                for item in old_history:
+                    if isinstance(item, dict) and "source" not in item and "url" in item:
+                        item["source"] = item.get("url", "")
             return data
     except Exception:
         pass
@@ -263,8 +273,12 @@ class EasySaveApp:
                 self.emit(job_id, "완료", 100, None)
                 self.record_history(source, "완료", ", ".join(job["outputs"]))
         except Exception as exc:
-            self.emit(job_id, "오류", None, str(exc))
-            self.record_history(job["source"], "오류", str(exc))
+            if job["cancel"].is_set():
+                self.emit(job_id, "취소", None, None)
+                self.record_history(job["source"], "취소", "사용자가 작업을 취소했습니다.")
+            else:
+                self.emit(job_id, "오류", None, str(exc))
+                self.record_history(job["source"], "오류", str(exc))
 
     def output_folder(self, kind):
         key = "last_mp3_dir" if kind == "mp3" else "last_video_dir"
