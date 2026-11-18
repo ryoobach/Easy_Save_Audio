@@ -1,5 +1,6 @@
 import json
 import html
+import http.server
 import os
 import queue
 import re
@@ -23,7 +24,7 @@ except ImportError:
     TkinterDnD = None
 
 APP_NAME = "Easy Save Audio & Video"
-APP_VERSION = "2.0.7"
+APP_VERSION = "2.0.8"
 APPDATA = Path(os.environ.get("APPDATA", str(Path.home()))) / "EasySaveAudio"
 APPDATA.mkdir(parents=True, exist_ok=True)
 SETTINGS_FILE = APPDATA / "settings.json"
@@ -77,8 +78,8 @@ class EasySaveApp:
     def __init__(self, root):
         self.root = root
         self.root.title(f"{APP_NAME}  {APP_VERSION}")
-        self.root.geometry("860x640")
-        self.root.minsize(720, 540)
+        self.root.geometry("800x560")
+        self.root.minsize(680, 500)
         self.settings = load_settings()
         self.events = queue.Queue()
         self.jobs = {}
@@ -88,12 +89,91 @@ class EasySaveApp:
         self.closing = False
         self.drop_contexts = {}
         self.dnd_error = None
+        self.browser_drag_var = tk.BooleanVar(value=False)
         self.build_ui()
+        self.start_browser_bridge()
         # The root window is also a drop target, so files/links can be dropped
         # anywhere in the application, not only on the URL entry or tab frame.
         self.register_drop_target(self.root, self.handle_window_drop)
         self.root.protocol("WM_DELETE_WINDOW", self.on_close)
         self.root.after(100, self.poll_events)
+
+    def start_browser_bridge(self):
+        app = self
+
+        class BridgeHandler(http.server.BaseHTTPRequestHandler):
+            def _headers(self, status=200):
+                self.send_response(status)
+                self.send_header("Content-Type", "application/json; charset=utf-8")
+                self.send_header("Access-Control-Allow-Origin", "*")
+                self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+                self.send_header("Access-Control-Allow-Headers", "Content-Type")
+                self.end_headers()
+
+            def do_OPTIONS(self):
+                self._headers(204)
+
+            def do_GET(self):
+                if self.path != "/status":
+                    self._headers(404)
+                    self.wfile.write(b'{"ok":false}')
+                    return
+                enabled = bool(app.browser_drag_var.get())
+                self._headers()
+                self.wfile.write(json.dumps({"enabled": enabled}).encode("utf-8"))
+
+            def do_POST(self):
+                if self.path != "/insert":
+                    self._headers(404)
+                    self.wfile.write(b'{"ok":false}')
+                    return
+                try:
+                    length = int(self.headers.get("Content-Length", "0"))
+                    payload = json.loads(self.rfile.read(length).decode("utf-8"))
+                    url = str(payload.get("url", "")).strip()
+                    if not is_url(url) or not app.browser_drag_var.get():
+                        self._headers(400)
+                        self.wfile.write(b'{"ok":false}')
+                        return
+                    app.root.after(0, lambda value=url: app.insert_browser_url(value))
+                    self._headers()
+                    self.wfile.write(b'{"ok":true}')
+                except Exception:
+                    self._headers(400)
+                    self.wfile.write(b'{"ok":false}')
+
+            def log_message(self, _format, *_args):
+                return
+
+        try:
+            self.browser_server = http.server.ThreadingHTTPServer(("127.0.0.1", 8765), BridgeHandler)
+            self.browser_server.daemon_threads = True
+            self.browser_server_thread = threading.Thread(
+                target=self.browser_server.serve_forever, daemon=True, name="browser-bridge"
+            )
+            self.browser_server_thread.start()
+        except OSError as exc:
+            self.browser_server = None
+            self.dnd_error = (self.dnd_error or "") + f" 브라우저 연결 포트 오류: {exc}"
+
+    def refresh_browser_bridge(self):
+        # The browser extension checks this state before showing its context-menu item.
+        return
+
+    def insert_browser_url(self, url):
+        if not self.browser_drag_var.get():
+            return
+        selected = self.tabs.select()
+        context = next(
+            (value for tab, value in self.drop_contexts.items() if str(tab) == selected),
+            None
+        )
+        if context is None:
+            return
+        _mode, _both, url_var = context
+        url_var.set(url)
+        self.root.lift()
+        self.root.focus_force()
 
     def build_ui(self):
         style = ttk.Style()
@@ -133,9 +213,9 @@ class EasySaveApp:
 
         # 탭은 제목 줄 아래에서 작업 목록과 같은 부모/가로 폭을 사용합니다.
         self.tabs = ttk.Notebook(outer)
-        self.tabs.pack(fill="x", expand=False, padx=0, pady=(3, 0))
-        self.mp3_tab = ttk.Frame(self.tabs, padding=14)
-        self.video_tab = ttk.Frame(self.tabs, padding=14)
+        self.tabs.pack(fill="x", expand=False, padx=0, pady=(2, 0))
+        self.mp3_tab = ttk.Frame(self.tabs, padding=10)
+        self.video_tab = ttk.Frame(self.tabs, padding=10)
         self.tabs.add(self.mp3_tab, text="MP3 다운로드")
         self.tabs.add(self.video_tab, text="동영상 다운로드")
         self.build_tab(self.mp3_tab, "mp3")
@@ -143,7 +223,7 @@ class EasySaveApp:
 
         queue_header = ttk.Frame(outer)
         # 오른쪽 여백을 탭 안쪽 버튼 영역과 맞춰 버튼 끝선을 통일합니다.
-        queue_header.pack(fill="x", pady=(4, 6))
+        queue_header.pack(fill="x", pady=(3, 4))
         ttk.Label(queue_header, text="작업 목록", font=("Malgun Gothic", 12, "bold")).pack(side="left")
         ttk.Button(queue_header, text="완료 작업 지우기", command=self.clear_completed, style="Action.TButton", width=16).pack(side="right")
         ttk.Label(queue_header, text="동시 실행 2개", foreground="#666").pack(side="right", padx=(12, 12))
@@ -151,7 +231,7 @@ class EasySaveApp:
         columns = ("source", "kind", "status", "progress")
         queue_area = ttk.Frame(outer)
         queue_area.pack(fill="both", expand=True, padx=0)
-        self.tree = ttk.Treeview(queue_area, columns=columns, show="headings", height=10, selectmode="browse")
+        self.tree = ttk.Treeview(queue_area, columns=columns, show="headings", height=6, selectmode="browse")
         self.tree.heading("source", text="파일 / URL")
         self.tree.heading("kind", text="작업")
         self.tree.heading("status", text="상태")
@@ -167,7 +247,7 @@ class EasySaveApp:
         self.tree.bind("<Delete>", lambda _e: self.cancel_selected())
 
         controls = ttk.Frame(outer)
-        controls.pack(fill="x", pady=(8, 0))
+        controls.pack(fill="x", pady=(5, 0))
         ttk.Button(controls, text="선택 작업 취소", command=self.cancel_selected).pack(side="left")
         ttk.Button(controls, text="작업 기록", command=self.show_history).pack(side="left", padx=8)
         ttk.Label(controls, text="다운로드 및 변환 작업은 각각 독립적으로 처리됩니다.", foreground="#666").pack(side="right")
@@ -181,10 +261,10 @@ class EasySaveApp:
         other_label = "동영상" if mode == "mp3" else "동영상(MP3)"
         option_group = ttk.Frame(options)
         ttk.Checkbutton(option_group, text=other_label, variable=both).pack(side="left", padx=(0, 18))
-        self.browser_drag_var = getattr(self, "browser_drag_var", tk.BooleanVar(value=False))
         ttk.Checkbutton(
-            option_group, text="드래그 앤 드롭으로 주소 입력",
-            variable=self.browser_drag_var
+            option_group, text="오른쪽 마우스 메뉴 주소 복사",
+            variable=self.browser_drag_var,
+            command=self.refresh_browser_bridge
         ).pack(side="left")
 
         # 체크박스 두 개의 시작점을 두 번째 탭 제목("동영상 다운로드")의
@@ -724,6 +804,11 @@ class EasySaveApp:
             if job["status"] not in ("완료", "오류", "취소"):
                 job["cancel"].set()
         self.executor.shutdown(wait=False, cancel_futures=True)
+        try:
+            self.browser_server.shutdown()
+            self.browser_server.server_close()
+        except Exception:
+            pass
         self.root.destroy()
 
 if __name__ == "__main__":
