@@ -22,7 +22,7 @@ except ImportError:
     TkinterDnD = None
 
 APP_NAME = "Easy Save Audio & Video"
-APP_VERSION = "2.0"
+APP_VERSION = "2.0.1"
 APPDATA = Path(os.environ.get("APPDATA", str(Path.home()))) / "EasySaveAudio"
 APPDATA.mkdir(parents=True, exist_ok=True)
 SETTINGS_FILE = APPDATA / "settings.json"
@@ -192,7 +192,9 @@ class EasySaveApp:
         try:
             from tkinterdnd2 import DND_FILES, DND_TEXT
             tab.drop_target_register(DND_FILES, DND_TEXT)
+            entry.drop_target_register(DND_FILES, DND_TEXT)
             tab.dnd_bind("<<Drop>>", lambda e: self.handle_drop(e, mode, both, url_var))
+            entry.dnd_bind("<<Drop>>", lambda e: self.handle_drop(e, mode, both, url_var))
         except Exception:
             pass
         if mode == "mp3":
@@ -254,7 +256,7 @@ class EasySaveApp:
                 messagebox.showwarning("지원하지 않는 파일", f"지원하지 않는 미디어 파일입니다.\n{filename}", parent=self.root)
 
     def handle_drop(self, event, mode, both, url_var):
-        data = str(event.data).strip()
+        data = str(event.data).strip().strip("{}").strip()
         if is_url(data):
             if self.browser_drag_var.get():
                 url_var.set(data)
