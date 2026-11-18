@@ -78,8 +78,8 @@ class EasySaveApp:
     def __init__(self, root):
         self.root = root
         self.root.title(f"{APP_NAME}  {APP_VERSION}")
-        self.root.geometry("800x560")
-        self.root.minsize(680, 500)
+        self.root.geometry("800x520")
+        self.root.minsize(680, 460)
         self.settings = load_settings()
         self.events = queue.Queue()
         self.jobs = {}
@@ -184,11 +184,11 @@ class EasySaveApp:
         style.configure("Utility.TButton", padding=(10, 6))
         style.configure("Action.TButton", padding=(10, 6), font=("Malgun Gothic", 9))
         style.configure("About.TButton", padding=(4, 0), font=("Segoe UI", 18, "bold"))
-        outer = ttk.Frame(self.root, padding=(18, 14))
+        outer = ttk.Frame(self.root, padding=(16, 10))
         outer.pack(fill="both", expand=True)
 
         header = ttk.Frame(outer)
-        header.pack(fill="x", pady=(0, 10))
+        header.pack(fill="x", pady=(0, 6))
         icon_path = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parent)) / "easy_save_audio.png"
         brand = ttk.Frame(header)
         brand.pack(side="left", fill="x", expand=True)
@@ -223,9 +223,9 @@ class EasySaveApp:
 
         queue_header = ttk.Frame(outer)
         # 오른쪽 여백을 탭 안쪽 버튼 영역과 맞춰 버튼 끝선을 통일합니다.
-        queue_header.pack(fill="x", pady=(3, 4))
+        queue_header.pack(fill="x", pady=(2, 3))
         ttk.Label(queue_header, text="작업 목록", font=("Malgun Gothic", 12, "bold")).pack(side="left")
-        ttk.Button(queue_header, text="완료 작업 지우기", command=self.clear_completed, style="Action.TButton", width=16).pack(side="right", padx=(0, 8))
+        ttk.Button(queue_header, text="완료 작업 지우기", command=self.clear_completed, style="Action.TButton", width=16).pack(side="right", padx=(0, 10))
         self.concurrent_label = ttk.Label(queue_header, text="동시 실행 0개", foreground="#666")
         self.concurrent_label.pack(side="right", padx=(12, 12))
 
@@ -256,7 +256,7 @@ class EasySaveApp:
     def build_tab(self, tab, mode):
         # Reference layout: options first, then one address row, then save folder/actions.
         options = ttk.Frame(tab, height=30)
-        options.pack(fill="x", pady=(0, 8))
+        options.pack(fill="x", pady=(0, 5))
         options.pack_propagate(False)
         both = tk.BooleanVar(value=False)
         other_label = "동영상" if mode == "mp3" else "MP3"
@@ -301,7 +301,7 @@ class EasySaveApp:
         self.tabs.bind("<<NotebookTabChanged>>", lambda _event: self.root.after_idle(align_option_group), add="+")
 
         input_row = ttk.Frame(tab)
-        input_row.pack(fill="x", pady=(0, 12))
+        input_row.pack(fill="x", pady=(0, 7))
         ttk.Label(input_row, text="주소", font=("Malgun Gothic", 11)).pack(side="left", padx=(0, 32))
         url_var = tk.StringVar()
         self.drop_contexts[tab] = (mode, both, url_var)
@@ -340,10 +340,6 @@ class EasySaveApp:
             self.video_folder = folder
             self.video_url = url_var
 
-        ttk.Label(
-            # 파일 드롭 안내 문구는 UI에서 제거했습니다.
-            foreground="#777"
-        ).pack(anchor="w", pady=(8, 0))
 
         # Register only the standard formats supported reliably by tkdnd.
         # Register the tab and its main child surfaces as well as the root window.
@@ -771,11 +767,13 @@ class EasySaveApp:
         win.transient(self.root)
         win.resizable(False, False)
 
-        outer = ttk.Frame(win, padding=(24, 18))
+        outer = ttk.Frame(win, padding=(20, 14))
         outer.pack(fill="both", expand=True)
 
         title_row = ttk.Frame(outer)
-        title_row.pack(anchor="w", fill="x", pady=(2, 8))
+        title_row.pack(anchor="w", fill="x", pady=(0, 6))
+        if hasattr(self, "header_image"):
+            ttk.Label(title_row, image=self.header_image).pack(side="left", padx=(0, 10), pady=(0, 1))
         ttk.Label(
             title_row, text=APP_NAME,
             font=("Malgun Gothic", 15, "bold")
