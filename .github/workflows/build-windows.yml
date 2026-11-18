@@ -36,7 +36,12 @@ jobs:
           $ffmpeg = python -c "import imageio_ffmpeg; print(imageio_ffmpeg.get_ffmpeg_exe())"
           python -m PyInstaller --noconfirm --clean --onefile --windowed --name EasySaveAudioVideo --icon easy_save_audio.ico --add-data "easy_save_audio.png;." --add-data "easy_save_audio.ico;." --add-binary "$ffmpeg;." --collect-all yt_dlp --collect-all tkinterdnd2 app_v2.py
           $zipName = "Easy_Save_Audio_Video_v$($version)_Windows_x64.zip"
-          Compress-Archive -Path dist/EasySaveAudioVideo.exe -DestinationPath "dist/$zipName" -Force
+          $packageDir = "dist/package"
+          New-Item -ItemType Directory -Force -Path "$packageDir/browser_extension" | Out-Null
+          Copy-Item dist/EasySaveAudioVideo.exe "$packageDir/EasySaveAudioVideo.exe"
+          Copy-Item browser_extension/* "$packageDir/browser_extension/"
+          Copy-Item BROWSER_EXTENSION_SETUP.txt "$packageDir/BROWSER_EXTENSION_SETUP.txt"
+          Compress-Archive -Path "$packageDir/*" -DestinationPath "dist/$zipName" -Force
           Write-Host "Created dist/$zipName"
       - name: Upload versioned Windows ZIP
         uses: actions/upload-artifact@v4
