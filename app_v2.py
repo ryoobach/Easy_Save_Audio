@@ -23,7 +23,7 @@ except ImportError:
     TkinterDnD = None
 
 APP_NAME = "Easy Save Audio & Video"
-APP_VERSION = "2.1.3"
+APP_VERSION = "2.1.4"
 APPDATA = Path(os.environ.get("APPDATA", str(Path.home()))) / "EasySaveAudio"
 APPDATA.mkdir(parents=True, exist_ok=True)
 SETTINGS_FILE = APPDATA / "settings.json"
