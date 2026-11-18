@@ -1,20 +1,27 @@
 from PIL import Image, ImageDraw
 
-# Solid red app tile with a large white eighth note and white play symbol.
+# Rounded cyan tile, blue music note, and a separate red play button.
 SIZE = 256
-im = Image.new("RGBA", (SIZE, SIZE), (220, 32, 48, 255))
+im = Image.new("RGBA", (SIZE, SIZE), (0, 0, 0, 0))
 d = ImageDraw.Draw(im)
 
-# White eighth note on the left.
+cyan = (139, 220, 230, 255)
+blue = (62, 70, 205, 255)
+red = (238, 47, 65, 255)
 white = (255, 255, 255, 255)
-d.ellipse((24, 158, 94, 228), fill=white)
-d.line((82, 178, 82, 48), fill=white, width=18)
-d.line((82, 48, 148, 32), fill=white, width=18)
-d.line((148, 32, 148, 158), fill=white, width=18)
-d.ellipse((110, 136, 180, 206), fill=white)
 
-# Enlarged white play triangle on the right.
-d.polygon([(157, 91), (157, 194), (239, 142)], fill=white)
+d.rounded_rectangle((4, 4, 252, 252), radius=54, fill=cyan)
+
+# Slightly compact two-note mark on the left.
+d.ellipse((22, 166, 82, 226), fill=blue)
+d.ellipse((88, 146, 148, 206), fill=blue)
+d.rounded_rectangle((68, 48, 84, 185), radius=7, fill=blue)
+d.rounded_rectangle((132, 34, 148, 164), radius=7, fill=blue)
+d.polygon([(76, 48), (142, 32), (142, 49), (76, 65)], fill=blue)
+
+# Separate play tile on the right; clear gap from the musical note.
+d.rounded_rectangle((164, 88, 239, 168), radius=19, fill=red)
+d.polygon([(190, 108), (190, 148), (221, 128)], fill=white)
 
 im.save("easy_save_audio.png", format="PNG")
 im.save("easy_save_audio.ico", format="ICO", sizes=[(256, 256), (128, 128), (64, 64), (32, 32), (16, 16)])
