@@ -139,8 +139,8 @@ class EasySaveApp:
         queue_header = ttk.Frame(outer)
         queue_header.pack(fill="x", pady=(4, 6))
         ttk.Label(queue_header, text="작업 목록", font=("Malgun Gothic", 12, "bold")).pack(side="left")
-        ttk.Label(queue_header, text="동시 실행 2개", foreground="#666").pack(side="right", padx=(12, 12))
         ttk.Button(queue_header, text="완료 작업 지우기", command=self.clear_completed, style="Utility.TButton", width=16).pack(side="right")
+        ttk.Label(queue_header, text="동시 실행 2개", foreground="#666").pack(side="right", padx=(12, 12))
 
         columns = ("source", "kind", "status", "progress")
         queue_area = ttk.Frame(outer)
