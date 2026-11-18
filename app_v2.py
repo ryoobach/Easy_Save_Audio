@@ -103,7 +103,7 @@ class EasySaveApp:
             pass
         style.configure("Utility.TButton", padding=(10, 6))
         style.configure("Action.TButton", padding=(10, 6), font=("Malgun Gothic", 9))
-        style.configure("About.TButton", padding=(6, 6))
+        style.configure("About.TButton", padding=(4, 0), font=("Segoe UI", 18, "bold"))
         outer = ttk.Frame(self.root, padding=(18, 14))
         outer.pack(fill="both", expand=True)
 
@@ -128,12 +128,12 @@ class EasySaveApp:
         ttk.Label(title_row, text=APP_VERSION, font=("Segoe UI", 11, "bold"), foreground="#b51f32").pack(side="left", padx=(10, 0))
         # 앱 정보 버튼은 기준 이미지처럼 창 상단 오른쪽에 배치합니다.
         ttk.Button(header, text="?", command=self.show_about, style="About.TButton", width=3).pack(
-            side="right", anchor="n", padx=(10, 0), pady=(20, 0)
+            side="right", anchor="center", padx=(10, 14), pady=0
         )
 
-        self.tabs = ttk.Notebook(title_area)
-        # 탭 박스가 아래 작업 목록 영역과 같은 가로 폭을 사용하도록 확장합니다.
-        self.tabs.pack(fill="x", expand=True, pady=(3, 0))
+        # 탭은 제목 줄 아래에서 작업 목록과 같은 부모/가로 폭을 사용합니다.
+        self.tabs = ttk.Notebook(outer)
+        self.tabs.pack(fill="x", expand=False, pady=(3, 0))
         self.mp3_tab = ttk.Frame(self.tabs, padding=14)
         self.video_tab = ttk.Frame(self.tabs, padding=14)
         self.tabs.add(self.mp3_tab, text="MP3 다운로드")
@@ -142,7 +142,8 @@ class EasySaveApp:
         self.build_tab(self.video_tab, "video")
 
         queue_header = ttk.Frame(outer)
-        queue_header.pack(fill="x", pady=(4, 6))
+        # 오른쪽 여백을 탭 안쪽 버튼 영역과 맞춰 버튼 끝선을 통일합니다.
+        queue_header.pack(fill="x", padx=(0, 14), pady=(4, 6))
         ttk.Label(queue_header, text="작업 목록", font=("Malgun Gothic", 12, "bold")).pack(side="left")
         ttk.Button(queue_header, text="완료 작업 지우기", command=self.clear_completed, style="Action.TButton", width=16).pack(side="right")
         ttk.Label(queue_header, text="동시 실행 2개", foreground="#666").pack(side="right", padx=(12, 12))
@@ -176,12 +177,12 @@ class EasySaveApp:
         options = ttk.Frame(tab)
         options.pack(fill="x", pady=(0, 8))
         both = tk.BooleanVar(value=False)
-        other_label = "동영상" if mode == "mp3" else "MP3"
+        other_label = "동영상" if mode == "mp3" else "동영상(MP3)"
         option_group = ttk.Frame(options)
         ttk.Checkbutton(option_group, text=other_label, variable=both).pack(side="left", padx=(0, 18))
         self.browser_drag_var = getattr(self, "browser_drag_var", tk.BooleanVar(value=False))
         ttk.Checkbutton(
-            option_group, text="드래그 앤 드롭으로 주소 자동 입력",
+            option_group, text="드래그 앤 드롭으로 주소 입력",
             variable=self.browser_drag_var
         ).pack(side="left")
 
