@@ -294,7 +294,7 @@ class EasySaveApp:
 
         # Browser drag formats differ: plain text, URI list, CF_HTML, or URL + title.
         # Accept title-link drags unconditionally; no browser extension is required.
-    candidates = []
+        candidates = []
         candidates.extend(re.findall(
             r"""(?i)href\s*=\s*["']([^"']+)["']""", raw_data
         ))

@@ -38,6 +38,7 @@ jobs:
           python -m PyInstaller --noconfirm --clean --onefile --windowed --name $appExe --icon easy_save_audio.ico --add-data "easy_save_audio.png;." --add-data "easy_save_audio.ico;." --add-binary "$ffmpeg;." --collect-all yt_dlp --collect-all tkinterdnd2 app_v2.py
           $zipName = "Easy_Save_Audio_Video_v$($version)_Windows_x64.zip"
           $packageDir = "dist/package"
+          New-Item -ItemType Directory -Force -Path $packageDir | Out-Null
           Copy-Item "dist/$appExe.exe" "$packageDir/$appExe.exe"
           Compress-Archive -Path "$packageDir/*" -DestinationPath "dist/$zipName" -Force
           Write-Host "Created dist/$zipName with the versioned application"
