@@ -341,7 +341,7 @@ class EasySaveApp:
             self.video_url = url_var
 
         ttk.Label(
-            tab, text="파일을 이 영역으로 드래그해 추가할 수도 있습니다(Windows 파일 드롭 지원).",
+            # 파일 드롭 안내 문구는 UI에서 제거했습니다.
             foreground="#777"
         ).pack(anchor="w", pady=(8, 0))
 
