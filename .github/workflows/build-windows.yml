@@ -4,7 +4,7 @@ on:
     branches: [ main ]
   workflow_dispatch:
 
-# 마지막 커밋 기준으로 빌드하며, 연속 수정 중에는 이전 빌드를 취소합니다.
+# 새 커밋이 들어오면 이전 빌드를 취소하고 최신 소스만 빌드합니다.
 concurrency:
   group: easy-save-audio-windows-build
   cancel-in-progress: true
@@ -13,9 +13,6 @@ jobs:
   build:
     runs-on: windows-latest
     steps:
-      - name: Wait for 5 minutes of inactivity
-        shell: pwsh
-        run: Start-Sleep -Seconds 300
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
@@ -23,50 +20,48 @@ jobs:
           architecture: x64
       - name: Install dependencies
         run: python -m pip install -r requirements.txt
-      - name: Install UPX executable compressor
-        shell: pwsh
-        run: |
-          choco install upx -y --no-progress
-          $upx = (Get-Command upx.exe -ErrorAction SilentlyContinue).Source
-          if (-not $upx) { throw "UPX installation failed; refusing to create an oversized package." }
-          $upxDir = Split-Path $upx -Parent
-          "UPX_DIR=$upxDir" >> $env:GITHUB_ENV
-          Write-Host "UPX directory: $upxDir"
       - name: Create application icon
         run: python make_icon.py
-      - name: Build single-file Windows executable
+      - name: Build Windows onedir application
         id: build
         shell: pwsh
         run: |
           $versionMatch = Select-String -Path app_v2.py -Pattern '^APP_VERSION = "([^"]+)"'
           if (-not $versionMatch) { throw "APP_VERSION was not found in app_v2.py" }
           $version = $versionMatch.Matches[0].Groups[1].Value
+          if ($version -ne "2.1.5") { throw "Expected version 2.1.5, found $version" }
           "version=$version" >> $env:GITHUB_OUTPUT
           $ffmpeg = python -c "import imageio_ffmpeg; print(imageio_ffmpeg.get_ffmpeg_exe())"
           $appExe = "EasySaveAudioVideo_v$version"
-          # --onefile embeds Python, dependencies, app resources, and FFmpeg in one EXE.
-          # At launch PyInstaller extracts runtime files to a temporary directory; no _internal folder is distributed.
-          python -m PyInstaller --noconfirm --clean --onefile --upx-dir "$env:UPX_DIR" --windowed --name $appExe --icon easy_save_audio.ico --add-data "easy_save_audio.png;." --add-data "easy_save_audio.ico;." --add-binary "$ffmpeg;." --collect-all yt_dlp --collect-all tkinterdnd2 app_v2.py
-          if ($LASTEXITCODE -ne 0) { throw "PyInstaller one-file build failed." }
-          $exePath = "dist/$appExe.exe"
-          if (-not (Test-Path $exePath)) { throw "Single-file executable was not created: $exePath" }
-          $zipName = "Easy_Save_Audio_Video_v$($version)_Windows_x64_OneFile.zip"
-          Compress-Archive -Path $exePath -DestinationPath "dist/$zipName" -CompressionLevel Optimal -Force
-          # Verify the distributable ZIP contains only the single EXE.
+          # onedir keeps the launcher EXE small and places runtime files in _internal.
+          # UPX is intentionally disabled to avoid decompression overhead at startup.
+          python -m PyInstaller --noconfirm --clean --onedir --contents-directory "_internal" --noupx --windowed --name $appExe --icon easy_save_audio.ico --add-data "easy_save_audio.png;." --add-data "easy_save_audio.ico;." --add-binary "$ffmpeg;." --collect-all yt_dlp --collect-all tkinterdnd2 app_v2.py
+          if ($LASTEXITCODE -ne 0) { throw "PyInstaller onedir build failed." }
+          $appDir = "dist/$appExe"
+          $exePath = "$appDir/$appExe.exe"
+          $internalDir = "$appDir/_internal"
+          if (-not (Test-Path $exePath)) { throw "Application executable was not created: $exePath" }
+          if (-not (Test-Path $internalDir)) { throw "_internal directory was not created." }
+          $zipName = "Easy_Save_Audio_Video_v$($version)_Windows_x64_Onedir.zip"
+          Compress-Archive -Path $appDir -DestinationPath "dist/$zipName" -CompressionLevel Optimal -Force
+          # Verify the package includes the launcher and the _internal runtime directory.
           Add-Type -AssemblyName System.IO.Compression.FileSystem
           $archive = [System.IO.Compression.ZipFile]::OpenRead((Join-Path (Get-Location) "dist/$zipName"))
           try {
             $entries = @($archive.Entries | Where-Object { -not $_.FullName.EndsWith("/") })
-            if ($entries.Count -ne 1 -or $entries[0].Name -ne "$appExe.exe") {
-              throw "The OneFile ZIP must contain exactly one EXE."
+            $hasExe = @($entries | Where-Object { $_.FullName -eq "$appExe/$appExe.exe" }).Count -eq 1
+            $hasInternal = @($entries | Where-Object { $_.FullName -like "$appExe/_internal/*" }).Count -gt 0
+            if (-not $hasExe -or -not $hasInternal) {
+              throw "Onedir ZIP verification failed: launcher or _internal files are missing."
             }
           } finally {
             $archive.Dispose()
           }
-          Write-Host "Created verified single-file package dist/$zipName"
-      - name: Upload single-file Windows ZIP
+          Write-Host "Created verified onedir package dist/$zipName"
+          Write-Host "Launcher size: $((Get-Item $exePath).Length) bytes"
+      - name: Upload Windows onedir ZIP
         uses: actions/upload-artifact@v4
         with:
-          name: Easy-Save-Audio-Video-v${{ steps.build.outputs.version }}-Windows-x64-OneFile
-          path: dist/Easy_Save_Audio_Video_v${{ steps.build.outputs.version }}_Windows_x64_OneFile.zip
+          name: Easy-Save-Audio-Video-v${{ steps.build.outputs.version }}-Windows-x64-Onedir
+          path: dist/Easy_Save_Audio_Video_v${{ steps.build.outputs.version }}_Windows_x64_Onedir.zip
           if-no-files-found: error
