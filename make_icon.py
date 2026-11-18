@@ -1,10 +1,20 @@
 from PIL import Image, ImageDraw
-im=Image.new("RGBA",(256,256),(201,29,46,255))
-d=ImageDraw.Draw(im)
-# White musical note: stem, flag and round note head
-d.ellipse((72,151,145,216),fill="white")
-d.rounded_rectangle((130,48,151,180),radius=8,fill="white")
-d.polygon([(145,48),(205,64),(205,87),(145,72)],fill="white")
-im.save("easy_save_audio.ico",format="ICO",sizes=[(256,256),(128,128),(64,64),(32,32),(16,16)])
 
-im.save("easy_save_audio.png",format="PNG")
+# Original Easy Save Audio & Video icon: audio waveform + red play symbol.
+im = Image.new("RGBA", (256, 256), (0, 0, 0, 0))
+d = ImageDraw.Draw(im)
+d.rounded_rectangle((12, 12, 244, 244), radius=52, fill=(28, 38, 54, 255))
+
+# Audio waveform on the left.
+wave_color = (245, 248, 252, 255)
+bars = [(48, 104), (66, 72), (84, 124), (102, 88), (120, 60)]
+for x, height in bars:
+    y0 = (256 - height) // 2
+    d.rounded_rectangle((x, y0, x + 10, y0 + height), radius=5, fill=wave_color)
+
+# Distinct red video play triangle on the right (not a copied platform logo).
+d.rounded_rectangle((148, 72, 224, 184), radius=22, fill=(225, 44, 58, 255))
+d.polygon([(176, 96), (176, 160), (207, 128)], fill=(255, 255, 255, 255))
+
+im.save("easy_save_audio.png", format="PNG")
+im.save("easy_save_audio.ico", format="ICO", sizes=[(256, 256), (128, 128), (64, 64), (32, 32), (16, 16)])
