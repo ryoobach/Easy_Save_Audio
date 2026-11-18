@@ -165,6 +165,24 @@ class EasySaveApp:
         ttk.Button(controls, text="작업 기록", command=self.show_history).pack(side="left", padx=8)
         ttk.Label(controls, text="다운로드 및 변환 작업은 각각 독립적으로 처리됩니다.", foreground="#666").pack(side="right")
 
+    def register_drop_target(self, widget, callback):
+        try:
+            # 다양한 브라우저 링크 드래그 형식을 받습니다.
+            from tkinterdnd2 import DND_ALL
+            widget.drop_target_register(DND_ALL)
+            widget.dnd_bind("<<Drop>>", callback)
+            return True
+        except Exception as exc:
+            # 일부 환경에서는 파일/텍스트 형식으로 대체합니다.
+            try:
+                from tkinterdnd2 import DND_FILES, DND_TEXT
+                widget.drop_target_register(DND_FILES, DND_TEXT)
+                widget.dnd_bind("<<Drop>>", callback)
+                return True
+            except Exception as fallback_exc:
+                self.dnd_error = f"{exc}; 대체 등록 실패: {fallback_exc}"
+                return False
+
     def build_main_panel(self, outer):
         panel = ttk.Frame(outer, padding=10)
         panel.pack(fill="x", pady=(2, 0))
