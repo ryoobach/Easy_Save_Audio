@@ -115,7 +115,6 @@ class EasySaveApp:
         try:
             self.header_image = tk.PhotoImage(file=str(icon_path))
             self.header_image = self.header_image.subsample(3, 3)
-            ttk.Label(brand, image=self.header_image).pack(side="left", padx=(0, 10))
             self.root.iconphoto(True, self.header_image)
         except Exception:
             pass
@@ -123,6 +122,8 @@ class EasySaveApp:
         title_area.pack(side="left", fill="x", expand=True)
         title_row = ttk.Frame(title_area)
         title_row.pack(anchor="w", fill="x")
+        if hasattr(self, "header_image"):
+            ttk.Label(title_row, image=self.header_image).pack(side="left", padx=(0, 10), pady=(1, 0))
         ttk.Label(title_row, text=APP_NAME, font=("Malgun Gothic", 18, "bold")).pack(side="left")
         ttk.Label(title_row, text=APP_VERSION, font=("Segoe UI", 11, "bold"), foreground="#b51f32").pack(side="left", padx=(10, 0))
         ttk.Button(title_row, text="ⓘ", command=self.show_about, style="About.TButton", width=3).pack(side="left", padx=(10, 0), pady=2)
