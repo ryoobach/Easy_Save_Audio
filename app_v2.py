@@ -22,7 +22,7 @@ except ImportError:
     TkinterDnD = None
 
 APP_NAME = "Easy Save Audio & Video"
-APP_VERSION = "2.0.1"
+APP_VERSION = "2.0.2"
 APPDATA = Path(os.environ.get("APPDATA", str(Path.home()))) / "EasySaveAudio"
 APPDATA.mkdir(parents=True, exist_ok=True)
 SETTINGS_FILE = APPDATA / "settings.json"
@@ -91,6 +91,8 @@ class EasySaveApp:
 
     def build_ui(self):
         style = ttk.Style()
+        style.configure("About.TButton", padding=(10, 6))
+        style.configure("Start.TButton", padding=(16, 10), font=("Malgun Gothic", 10, "bold"))
         try:
             style.theme_use("vista")
         except tk.TclError:
@@ -110,7 +112,7 @@ class EasySaveApp:
             pass
         ttk.Label(header, text=APP_NAME, font=("Malgun Gothic", 18, "bold")).pack(side="left")
         ttk.Label(header, text=APP_VERSION, font=("Segoe UI", 11, "bold"), foreground="#b51f32").pack(side="left", padx=(10, 0))
-        ttk.Button(header, text="ⓘ", width=3, command=self.show_about).pack(side="right")
+        ttk.Button(header, text="앱 정보", command=self.show_about, style="About.TButton").pack(side="right", padx=(10, 0), pady=2)
 
         self.tabs = ttk.Notebook(outer)
         self.tabs.pack(fill="x", pady=(0, 10))
@@ -176,7 +178,7 @@ class EasySaveApp:
         button_row = ttk.Frame(tab)
         button_row.pack(fill="x")
         ttk.Button(button_row, text="파일 선택", command=lambda: self.add_files(mode, url_var)).pack(side="left")
-        ttk.Button(button_row, text="변환 시작", command=lambda: self.start_current(mode, url_var, both)).pack(side="left", padx=8)
+        ttk.Button(button_row, text="다운로드 시작", command=lambda: self.start_current(mode, url_var, both), style="Start.TButton").pack(side="left", padx=8, pady=2)
         folder = tk.StringVar(value=self.settings.get("last_mp3_dir" if mode == "mp3" else "last_video_dir", str(Path.home())))
         folder_row = ttk.Frame(tab)
         folder_row.pack(fill="x", pady=(10, 0))
@@ -256,29 +258,34 @@ class EasySaveApp:
                 messagebox.showwarning("지원하지 않는 파일", f"지원하지 않는 미디어 파일입니다.\n{filename}", parent=self.root)
 
     def handle_drop(self, event, mode, both, url_var):
-        data = str(event.data).strip().strip("{}").strip()
-        if is_url(data):
-            if self.browser_drag_var.get():
-                url_var.set(data)
-            return
+        # Browsers may include a URL together with a title or other drag metadata.
+        raw_data = str(event.data).strip()
+        url_matches = re.findall(r'https?://[^\\s<>"{}|\\\\^\\x60\\[\\]]+', raw_data, flags=re.IGNORECASE)
+        for candidate in url_matches:
+            candidate = candidate.rstrip(".,;:!?)']\\\"")
+            if is_url(candidate):
+                if self.browser_drag_var.get():
+                    url_var.set(candidate)
+                return
         try:
             dropped = self.root.tk.splitlist(event.data)
         except Exception:
             dropped = [event.data]
-        files = [str(item).strip() for item in dropped if str(item).strip()]
+        files = [str(item).strip().strip("{}").strip() for item in dropped if str(item).strip()]
         if not files:
             return
+        for item in files:
+            if is_url(item):
+                if self.browser_drag_var.get():
+                    url_var.set(item)
+                return
         url_var.set(files[0] if len(files) == 1 else f"{len(files)}개 파일 선택")
         for filename in files:
-            if is_url(filename):
-                if self.browser_drag_var.get():
-                    url_var.set(filename)
-                continue
             ext = Path(filename).suffix.lower()
             if ext in VIDEO_EXTENSIONS or ext in AUDIO_EXTENSIONS:
                 self.enqueue(filename, "local", ["mp3"])
             else:
-                messagebox.showwarning("지원하지 않는 파일", f"지원하지 않는 미디어 파일입니다.\n{filename}", parent=self.root)
+                messagebox.showwarning("지원하지 않는 파일", f"지원하지 않는 미디어 파일입니다.\\n{filename}", parent=self.root)
 
     def start_current(self, mode, url_var, both):
         value = url_var.get().strip()
