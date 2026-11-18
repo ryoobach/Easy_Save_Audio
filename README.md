@@ -1,13 +1,31 @@
-# 이지 세이브 오디오 (Easy Save Audio)
+# Easy Save Audio & Video 2.0
 
-Windows 64비트 무설치 포터블 앱.
+Windows 64-bit portable multimedia utility.
 
-- 권한이 있는 HTTP/HTTPS 직접 미디어 주소 지원
-- 영상 재생 없이 FFmpeg로 오디오 트랙 추출
-- MP3 192 kbps / 48 kHz
-- 영상 제목 또는 원본 파일명을 기본 파일명으로 사용
-- 마지막 저장 폴더 및 마지막 주소 기억
-- 최근 작업 이력 최대 200건 저장
-- 앱 정보: Developer: Ryoo jaesang
+## Current 2.0 foundation
 
-유튜브 페이지 URL, DRM 또는 접근 제한 우회는 지원하지 않습니다.
+- Separate **MP3 다운로드** and **동영상 다운로드** tabs
+- URL-based MP3 extraction and video download using yt-dlp and FFmpeg
+- Optional MP3 + video output from one URL
+- Local audio/video file selection and batch registration
+- Optional Windows drag-and-drop file input
+- Two concurrent background jobs with per-job status and progress
+- Remember separate MP3 and video output folders
+- Preserve and migrate the existing 1.x settings/history file
+- App title and initial screen show the current version
+- App information shows only product name, version, and Windows platform
+
+## Build
+
+The existing GitHub Actions workflow builds the Windows x64 portable executable.
+
+Artifact: `Easy-Save-Audio-Video-Windows-x64`
+
+Executable: `EasySaveAudioVideo.exe`
+
+## Notes
+
+- Existing repository and GitHub Actions workflow are retained.
+- The previous `main.py` remains in the repository as the 1.x implementation; the 2.0 workflow builds `app_v2.py`.
+- Browser extension/native messaging, broader media-format conversion, persistent resumable queue state, and the remaining planned refinements are subsequent development work.
+- Use only media and URLs that you are authorized to download. DRM and access-control circumvention are not supported.
