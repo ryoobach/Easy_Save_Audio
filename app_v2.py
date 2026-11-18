@@ -76,8 +76,8 @@ class EasySaveApp:
     def __init__(self, root):
         self.root = root
         self.root.title(f"{APP_NAME}  {APP_VERSION}")
-        self.root.geometry("900x700")
-        self.root.minsize(760, 580)
+        self.root.geometry("860x640")
+        self.root.minsize(720, 540)
         self.settings = load_settings()
         self.events = queue.Queue()
         self.jobs = {}
@@ -101,21 +101,27 @@ class EasySaveApp:
         outer.pack(fill="both", expand=True)
 
         header = ttk.Frame(outer)
-        header.pack(fill="x", pady=(0, 12))
+        header.pack(fill="x", pady=(0, 10))
         icon_path = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parent)) / "easy_save_audio.png"
+        brand = ttk.Frame(header)
+        brand.pack(side="left", fill="x", expand=True)
         try:
             self.header_image = tk.PhotoImage(file=str(icon_path))
             self.header_image = self.header_image.subsample(3, 3)
-            ttk.Label(header, image=self.header_image).pack(side="left", padx=(0, 10))
+            ttk.Label(brand, image=self.header_image).pack(side="left", padx=(0, 10))
             self.root.iconphoto(True, self.header_image)
         except Exception:
             pass
-        ttk.Label(header, text=APP_NAME, font=("Malgun Gothic", 18, "bold")).pack(side="left")
-        ttk.Label(header, text=APP_VERSION, font=("Segoe UI", 11, "bold"), foreground="#b51f32").pack(side="left", padx=(10, 0))
+        title_area = ttk.Frame(brand)
+        title_area.pack(side="left", fill="x", expand=True)
+        title_row = ttk.Frame(title_area)
+        title_row.pack(anchor="w", fill="x")
+        ttk.Label(title_row, text=APP_NAME, font=("Malgun Gothic", 18, "bold")).pack(side="left")
+        ttk.Label(title_row, text=APP_VERSION, font=("Segoe UI", 11, "bold"), foreground="#b51f32").pack(side="left", padx=(10, 0))
         ttk.Button(header, text="앱 정보", command=self.show_about, style="About.TButton").pack(side="right", padx=(10, 0), pady=2)
 
-        self.tabs = ttk.Notebook(outer)
-        self.tabs.pack(fill="x", pady=(0, 10))
+        self.tabs = ttk.Notebook(title_area)
+        self.tabs.pack(anchor="w", fill="x", pady=(3, 0))
         self.mp3_tab = ttk.Frame(self.tabs, padding=14)
         self.video_tab = ttk.Frame(self.tabs, padding=14)
         self.tabs.add(self.mp3_tab, text="MP3 다운로드")
@@ -130,7 +136,7 @@ class EasySaveApp:
         ttk.Label(queue_header, text="동시 실행 2개", foreground="#666").pack(side="right", padx=12)
 
         columns = ("source", "kind", "status", "progress")
-        self.tree = ttk.Treeview(outer, columns=columns, show="headings", height=12, selectmode="browse")
+        self.tree = ttk.Treeview(outer, columns=columns, show="headings", height=10, selectmode="browse")
         self.tree.heading("source", text="파일 / URL")
         self.tree.heading("kind", text="작업")
         self.tree.heading("status", text="상태")
