@@ -23,7 +23,7 @@ except ImportError:
     TkinterDnD = None
 
 APP_NAME = "Easy Save Audio & Video"
-APP_VERSION = "2.0.6"
+APP_VERSION = "2.0.7"
 APPDATA = Path(os.environ.get("APPDATA", str(Path.home()))) / "EasySaveAudio"
 APPDATA.mkdir(parents=True, exist_ok=True)
 SETTINGS_FILE = APPDATA / "settings.json"
@@ -133,7 +133,7 @@ class EasySaveApp:
 
         # 탭은 제목 줄 아래에서 작업 목록과 같은 부모/가로 폭을 사용합니다.
         self.tabs = ttk.Notebook(outer)
-        self.tabs.pack(fill="x", expand=False, pady=(3, 0))
+        self.tabs.pack(fill="x", expand=False, padx=0, pady=(3, 0))
         self.mp3_tab = ttk.Frame(self.tabs, padding=14)
         self.video_tab = ttk.Frame(self.tabs, padding=14)
         self.tabs.add(self.mp3_tab, text="MP3 다운로드")
@@ -150,7 +150,7 @@ class EasySaveApp:
 
         columns = ("source", "kind", "status", "progress")
         queue_area = ttk.Frame(outer)
-        queue_area.pack(fill="both", expand=True)
+        queue_area.pack(fill="both", expand=True, padx=0)
         self.tree = ttk.Treeview(queue_area, columns=columns, show="headings", height=10, selectmode="browse")
         self.tree.heading("source", text="파일 / URL")
         self.tree.heading("kind", text="작업")
