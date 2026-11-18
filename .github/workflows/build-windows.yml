@@ -3,10 +3,19 @@ on:
   push:
     branches: [ main ]
   workflow_dispatch:
+
+# 새 커밋이 들어오면 이전 대기/빌드를 취소하고 마지막 커밋 기준으로 다시 5분 대기합니다.
+concurrency:
+  group: easy-save-audio-windows-build
+  cancel-in-progress: true
+
 jobs:
   build:
     runs-on: windows-latest
     steps:
+      - name: Wait for 5 minutes of inactivity
+        shell: pwsh
+        run: Start-Sleep -Seconds 300
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
