@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Easy Save Audio & Video - 주소복사",
-  "version": "2.0.8",
+  "version": "2.0.9",
   "description": "브라우저에서 선택한 동영상 또는 링크 주소를 Easy Save Audio & Video 프로그램으로 전달합니다.",
   "permissions": [
     "contextMenus"
