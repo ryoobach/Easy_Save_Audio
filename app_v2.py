@@ -226,7 +226,8 @@ class EasySaveApp:
         queue_header.pack(fill="x", pady=(3, 4))
         ttk.Label(queue_header, text="작업 목록", font=("Malgun Gothic", 12, "bold")).pack(side="left")
         ttk.Button(queue_header, text="완료 작업 지우기", command=self.clear_completed, style="Action.TButton", width=16).pack(side="right")
-        ttk.Label(queue_header, text="동시 실행 2개", foreground="#666").pack(side="right", padx=(12, 12))
+        self.concurrent_label = ttk.Label(queue_header, text="동시 실행 0개", foreground="#666")
+        self.concurrent_label.pack(side="right", padx=(12, 12))
 
         columns = ("source", "kind", "status", "progress")
         queue_area = ttk.Frame(outer)
@@ -690,6 +691,15 @@ class EasySaveApp:
             shutil.copy2(source, target)
             self.emit(job_id, "동영상 파일 복사 완료", 100, None)
 
+    def update_concurrency_label(self):
+        terminal = {"완료", "오류", "취소"}
+        running = sum(
+            1 for job in self.jobs.values()
+            if job.get("submitted") and job.get("status") not in terminal
+            and job.get("status") not in ("대기 중", "취소 요청")
+        )
+        self.concurrent_label.configure(text=f"동시 실행 {running}개")
+
     def poll_events(self):
         try:
             while True:
@@ -699,6 +709,7 @@ class EasySaveApp:
                 job = self.jobs[job_id]
                 if status:
                     job["status"] = status
+                self.update_concurrency_label()
                 if progress is not None:
                     job["progress"] = max(0, min(100, int(progress)))
                 if self.tree.exists(job_id):
