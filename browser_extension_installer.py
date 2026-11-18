@@ -24,9 +24,9 @@ def registry_browser(exe_name):
     try:
         import winreg
         keys = [
-            (winreg.HKEY_CURRENT_USER, rf"SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\App Paths\\{exe_name}"),
-            (winreg.HKEY_LOCAL_MACHINE, rf"SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\App Paths\\{exe_name}"),
-            (winreg.HKEY_LOCAL_MACHINE, rf"SOFTWARE\\WOW6432Node\\Microsoft\\Windows\\CurrentVersion\\App Paths\\{exe_name}"),
+            (winreg.HKEY_CURRENT_USER, rf"SOFTWARE\Microsoft\Windows\CurrentVersion\App Paths\{exe_name}"),
+            (winreg.HKEY_LOCAL_MACHINE, rf"SOFTWARE\Microsoft\Windows\CurrentVersion\App Paths\{exe_name}"),
+            (winreg.HKEY_LOCAL_MACHINE, rf"SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\App Paths\{exe_name}"),
         ]
         for hive, key_path in keys:
             try:
@@ -47,8 +47,8 @@ def find_browser(exe_name):
     if candidate:
         return candidate
     local = Path(os.environ.get("LOCALAPPDATA", str(Path.home())))
-    program_files = [Path(os.environ.get("PROGRAMFILES", r"C:\\Program Files")),
-                     Path(os.environ.get("PROGRAMFILES(X86)", r"C:\\Program Files (x86)"))]
+    program_files = [Path(os.environ.get("PROGRAMFILES", r"C:\Program Files")),
+                     Path(os.environ.get("PROGRAMFILES(X86)", r"C:\Program Files (x86)"))]
     roots = {
         "chrome.exe": [local / "Google/Chrome/Application/chrome.exe"] +
                       [p / "Google/Chrome/Application/chrome.exe" for p in program_files],
@@ -78,7 +78,7 @@ def main():
             shutil.rmtree(DEST)
         shutil.copytree(source, DEST)
     except Exception as exc:
-        messagebox.showerror("Right Click 설치", f"확장 프로그램 파일 설치에 실패했습니다.\\n{exc}")
+        messagebox.showerror("Right Click 설치", f"확장 프로그램 파일 설치에 실패했습니다.\n{exc}")
         return
 
     detected = []
@@ -94,17 +94,17 @@ def main():
     if detected:
         browser_text = ", ".join(detected)
         message = (
-            "확장 프로그램 파일을 준비했습니다.\\n\\n"
-            f"검색된 브라우저: {browser_text}\\n"
-            f"설치 폴더: {DEST}\\n\\n"
+            "확장 프로그램 파일을 준비했습니다.\n\n"
+            f"검색된 브라우저: {browser_text}\n"
+            f"설치 폴더: {DEST}\n\n"
             "열린 각 브라우저의 확장 프로그램 화면에서 개발자 모드를 켜고 "
-            "'압축해제된 확장 프로그램을 로드합니다'를 한 번 선택한 뒤 위 폴더를 지정해 주세요.\\n\\n"
+            "'압축해제된 확장 프로그램을 로드합니다'를 한 번 선택한 뒤 위 폴더를 지정해 주세요.\n\n"
             "브라우저 보안정책상 최초 등록 승인만 직접 필요합니다. JS·JSON 파일을 각각 열거나 선택하지 마세요."
         )
     else:
         message = (
-            "확장 프로그램 파일을 준비했습니다.\\n\\n"
-            f"설치 폴더: {DEST}\\n\\n"
+            "확장 프로그램 파일을 준비했습니다.\n\n"
+            f"설치 폴더: {DEST}\n\n"
             "Chrome, Edge 또는 네이버 웨일을 찾지 못했습니다. 브라우저 설치 후 확장 프로그램 화면에서 "
             "개발자 모드를 켜고 '압축해제된 확장 프로그램을 로드합니다'를 선택해 위 폴더를 지정해 주세요."
         )
