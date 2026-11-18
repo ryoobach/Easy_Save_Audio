@@ -185,13 +185,17 @@ class EasySaveApp:
         button_row = ttk.Frame(tab)
         button_row.pack(fill="x")
         ttk.Button(button_row, text="파일 선택", command=lambda: self.add_files(mode, url_var)).pack(side="left")
-        ttk.Button(button_row, text="다운로드 시작", command=lambda: self.start_current(mode, url_var, both), style="Start.TButton").pack(side="left", padx=8, pady=2)
         folder = tk.StringVar(value=self.settings.get("last_mp3_dir" if mode == "mp3" else "last_video_dir", str(Path.home())))
         folder_row = ttk.Frame(tab)
         folder_row.pack(fill="x", pady=(10, 0))
         ttk.Label(folder_row, text=save_label + ":").pack(side="left")
         ttk.Label(folder_row, textvariable=folder, foreground="#555").pack(side="left", padx=6)
-        ttk.Button(folder_row, text="변경", command=lambda: self.choose_folder(mode, folder)).pack(side="right")
+        folder_actions = ttk.Frame(folder_row)
+        folder_actions.pack(side="right")
+        ttk.Button(folder_actions, text="변경", command=lambda: self.choose_folder(mode, folder),
+                   style="Utility.TButton", width=10).pack(side="left")
+        ttk.Button(folder_actions, text="다운로드 시작", command=lambda: self.start_current(mode, url_var, both),
+                   style="Start.TButton", width=16).pack(side="left", padx=(8, 0), pady=2)
         if mode == "mp3":
             self.mp3_folder = folder
         else:
