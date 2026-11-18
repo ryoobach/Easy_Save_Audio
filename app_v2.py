@@ -316,7 +316,7 @@ class EasySaveApp:
 
             cleaned = []
             for candidate in candidates:
-                value = html.unescape(str(candidate)).strip().strip("\\\\\\"'<>(),;")
+                value = html.unescape(str(candidate)).strip().strip(" \t\r\n\\\"'<>(),;")
                 value = value.splitlines()[0].strip() if value else ""
                 value = value.rstrip(".,;)")
                 if is_url(value) and value not in cleaned:
