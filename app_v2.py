@@ -90,6 +90,7 @@ class EasySaveApp:
         self.drop_contexts = {}
         self.dnd_error = None
         self.browser_drag_var = tk.BooleanVar(value=False)
+        self.browser_menu_enabled = False
         self.build_ui()
         self.start_browser_bridge()
         # The root window is also a drop target, so files/links can be dropped
@@ -118,7 +119,7 @@ class EasySaveApp:
                     self._headers(404)
                     self.wfile.write(b'{"ok":false}')
                     return
-                enabled = bool(app.browser_drag_var.get())
+                enabled = bool(app.browser_menu_enabled)
                 self._headers()
                 self.wfile.write(json.dumps({"enabled": enabled}).encode("utf-8"))
 
@@ -131,7 +132,7 @@ class EasySaveApp:
                     length = int(self.headers.get("Content-Length", "0"))
                     payload = json.loads(self.rfile.read(length).decode("utf-8"))
                     url = str(payload.get("url", "")).strip()
-                    if not is_url(url) or not app.browser_drag_var.get():
+                    if not is_url(url) or not app.browser_menu_enabled:
                         self._headers(400)
                         self.wfile.write(b'{"ok":false}')
                         return
@@ -156,9 +157,8 @@ class EasySaveApp:
             self.browser_server = None
             self.dnd_error = (self.dnd_error or "") + f" 브라우저 연결 포트 오류: {exc}"
 
-    def refresh_browser_bridge(self):
-        # The browser extension checks this state before showing its context-menu item.
-        return
+    def on_browser_menu_toggle(self):
+        self.browser_menu_enabled = bool(self.browser_drag_var.get())
 
     def insert_browser_url(self, url):
         if not self.browser_drag_var.get():
@@ -264,7 +264,7 @@ class EasySaveApp:
         ttk.Checkbutton(
             option_group, text="오른쪽 마우스 메뉴 주소 복사",
             variable=self.browser_drag_var,
-            command=self.refresh_browser_bridge
+            command=self.on_browser_menu_toggle
         ).pack(side="left")
 
         # 체크박스 두 개의 시작점을 두 번째 탭 제목("동영상 다운로드")의
