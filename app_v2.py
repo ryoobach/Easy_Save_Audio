@@ -23,7 +23,7 @@ except ImportError:
     TkinterDnD = None
 
 APP_NAME = "Easy Save Audio & Video"
-APP_VERSION = "2.1.4"
+APP_VERSION = "2.1.5"
 APPDATA = Path(os.environ.get("APPDATA", str(Path.home()))) / "EasySaveAudio"
 APPDATA.mkdir(parents=True, exist_ok=True)
 SETTINGS_FILE = APPDATA / "settings.json"
@@ -234,7 +234,7 @@ class EasySaveApp:
         action_row = ttk.Frame(panel)
         action_row.pack(fill="x", pady=(5, 0))
         ttk.Button(
-            action_row, text="다운로드 시작",
+            action_row, text="변환 시작",
             command=self.start_current, style="Action.TButton", width=16
         ).pack(side="right")
 
@@ -379,14 +379,40 @@ class EasySaveApp:
 
     def start_current(self):
         value = self.url_var.get().strip()
-        if value:
-            if not is_url(value):
-                messagebox.showwarning("주소 확인", "올바른 http:// 또는 https:// 주소를 입력해 주세요.", parent=self.root)
-                return
+        if value and is_url(value):
             if not self.selected_outputs():
                 messagebox.showwarning("다운로드 형식 선택", "MP3 또는 동영상 중 하나 이상 선택해 주세요.", parent=self.root)
                 return
             self.stage_url(self.url_var)
+            self.url_var.set("")
+        elif value:
+            # A dropped local file is already queued by handle_drop/add_files.
+            # The entry displays either its path or a multi-file count label.
+            pending_local = any(
+                not job.get("submitted")
+                and job.get("status") == "대기 중"
+                and job.get("source_type") == "local"
+                for job in self.jobs.values()
+            )
+            local_path = Path(value.strip('"'))
+            if local_path.is_file():
+                already_queued = any(
+                    job.get("source_type") == "local"
+                    and Path(job.get("source", "")).resolve() == local_path.resolve()
+                    and not job.get("submitted")
+                    and job.get("status") == "대기 중"
+                    for job in self.jobs.values()
+                )
+                if not already_queued:
+                    self.enqueue(str(local_path), "local", ["mp3"])
+                    pending_local = True
+            elif not pending_local:
+                messagebox.showwarning(
+                    "파일 또는 주소 확인",
+                    "웹 주소를 입력하거나 MP4 등의 미디어 파일을 드래그해 주세요.",
+                    parent=self.root
+                )
+                return
             self.url_var.set("")
         self.start_pending()
 
