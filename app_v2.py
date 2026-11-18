@@ -91,12 +91,12 @@ class EasySaveApp:
 
     def build_ui(self):
         style = ttk.Style()
-        style.configure("About.TButton", padding=(10, 6))
-        style.configure("Start.TButton", padding=(16, 10), font=("Malgun Gothic", 10, "bold"))
         try:
             style.theme_use("vista")
         except tk.TclError:
             pass
+        style.configure("About.TButton", padding=(10, 6))
+        style.configure("Start.TButton", padding=(16, 10), font=("Malgun Gothic", 10, "bold"))
         outer = ttk.Frame(self.root, padding=(18, 14))
         outer.pack(fill="both", expand=True)
 
