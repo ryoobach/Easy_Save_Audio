@@ -218,14 +218,28 @@ class EasySaveApp:
             foreground="#777"
         ).pack(anchor="w", pady=(8, 0))
 
+        # Register browser payload formats as well as Windows file drops.
         try:
-            from tkinterdnd2 import DND_FILES, DND_TEXT
-            tab.drop_target_register(DND_FILES, DND_TEXT)
-            entry.drop_target_register(DND_FILES, DND_TEXT)
-            tab.dnd_bind("<<Drop>>", lambda e: self.handle_drop(e, mode, both, url_var))
-            entry.dnd_bind("<<Drop>>", lambda e: self.handle_drop(e, mode, both, url_var))
-        except Exception:
-            pass
+            import tkinterdnd2 as tkdnd
+            drop_types = [
+                getattr(tkdnd, "DND_FILES", "DND_Files"),
+                getattr(tkdnd, "DND_TEXT", "DND_Text"),
+                getattr(tkdnd, "DND_HTML", "DND_HTML"),
+                getattr(tkdnd, "DND_URL", "DND_URL"),
+            ]
+            for widget in (tab, entry):
+                try:
+                    widget.drop_target_register(*drop_types)
+                except Exception:
+                    widget.drop_target_register(
+                        getattr(tkdnd, "DND_FILES", "DND_Files"),
+                        getattr(tkdnd, "DND_TEXT", "DND_Text")
+                    )
+                widget.dnd_bind("<<Drop>>", lambda e, m=mode, b=both, v=url_var: self.handle_drop(e, m, b, v))
+        except Exception as exc:
+            self.dnd_error = str(exc)
+            ttk.Label(tab, text="드래그 앤 드롭을 사용할 수 없습니다. 초기화 상태를 확인해 주세요.",
+                      foreground="#b51f32").pack(anchor="w", pady=(4, 0))
 
     def choose_folder(self, mode, folder_var):
         selected = filedialog.askdirectory(parent=self.root, initialdir=folder_var.get() or str(Path.home()))
@@ -283,47 +297,73 @@ class EasySaveApp:
     def handle_drop(self, event, mode, both, url_var):
         raw_data = html.unescape(str(event.data or "")).strip()
 
-        # Browser drag payloads vary: plain URL, URI list, or HTML anchor markup.
+        # Browser drag formats differ: plain text, URI list, CF_HTML, or URL + title.
         if self.browser_drag_var.get():
             candidates = []
             candidates.extend(re.findall(
                 r"""(?i)href\s*=\s*["']([^"']+)["']""", raw_data
             ))
-            candidates.extend(re.findall(r"""https?://[^\s<>"']+""", raw_data, flags=re.IGNORECASE))
+            candidates.extend(re.findall(
+                r"""(?i)(?:SourceURL|URL)\s*:\s*(https?://[^\s]+)""", raw_data
+            ))
+            candidates.extend(re.findall(
+                r"""https?://[^\s<>"']+""", raw_data, flags=re.IGNORECASE
+            ))
             try:
                 candidates.extend(self.root.tk.splitlist(event.data))
             except Exception:
                 pass
+
+            cleaned = []
             for candidate in candidates:
-                candidate = html.unescape(str(candidate)).strip().strip("\\\"'<>(),;")
-                if is_url(candidate):
-                    url_var.set(candidate)
-                    entry = event.widget if isinstance(event.widget, ttk.Entry) else None
-                    if entry is not None:
-                        entry.focus_set()
-                        entry.icursor(tk.END)
-                    return "break"
+                value = html.unescape(str(candidate)).strip().strip("\\\\\\"'<>(),;")
+                value = value.splitlines()[0].strip() if value else ""
+                value = value.rstrip(".,;)")
+                if is_url(value) and value not in cleaned:
+                    cleaned.append(value)
+
+            # Prefer the YouTube page URL over a thumbnail/image URL.
+            selected = next(
+                (u for u in cleaned if re.search(
+                    r"(?i)^https?://(?:(?:www|m)\.)?(?:youtube\.com|youtu\.be)/", u
+                )),
+                cleaned[0] if cleaned else None
+            )
+            if selected:
+                url_var.set(selected)
+                try:
+                    event.widget.focus_set()
+                    if isinstance(event.widget, ttk.Entry):
+                        event.widget.icursor(tk.END)
+                except Exception:
+                    pass
+                return "break"
 
         try:
             dropped = self.root.tk.splitlist(event.data)
         except Exception:
             dropped = [event.data]
         files = [str(item).strip().strip("{}").strip() for item in dropped if str(item).strip()]
-        if not files:
-            return "break"
-        for item in files:
-            if is_url(item):
-                return "break"
-        url_var.set(files[0] if len(files) == 1 else f"{len(files)}개 파일 선택")
-        for filename in files:
-            ext = Path(filename).suffix.lower()
-            if ext in VIDEO_EXTENSIONS or ext in AUDIO_EXTENSIONS:
+        files = [item for item in files if not is_url(item)]
+        media_files = [
+            item for item in files
+            if Path(item).suffix.lower() in VIDEO_EXTENSIONS | AUDIO_EXTENSIONS
+        ]
+        if media_files:
+            url_var.set(media_files[0] if len(media_files) == 1 else f"{len(media_files)}개 파일 선택")
+            for filename in media_files:
                 self.enqueue(filename, "local", ["mp3"])
-            else:
-                messagebox.showwarning(
-                    "지원하지 않는 파일", f"지원하지 않는 미디어 파일입니다.\\n{filename}",
-                    parent=self.root
-                )
+            return "break"
+
+        if self.browser_drag_var.get():
+            messagebox.showinfo(
+                "주소 자동 입력",
+                "드롭한 항목에서 웹 주소를 찾지 못했습니다.\n\n"
+                "유튜브 영상 화면 자체가 아니라 영상 제목이나 공유 링크를 드래그해 "
+                "주소 입력란에 놓아 주세요. 브라우저가 영상 화면 드래그에 주소를 "
+                "제공하지 않는 경우에는 주소 자동 입력이 불가능합니다.",
+                parent=self.root
+            )
         return "break"
 
     def start_current(self, mode, url_var, both):
