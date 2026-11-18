@@ -34,7 +34,7 @@ jobs:
           Write-Host "UPX directory: $upxDir"
       - name: Create application icon
         run: python make_icon.py
-      - name: Build compressed fast-start portable folder and versioned ZIP
+      - name: Build single-file Windows executable
         id: build
         shell: pwsh
         run: |
@@ -44,15 +44,29 @@ jobs:
           "version=$version" >> $env:GITHUB_OUTPUT
           $ffmpeg = python -c "import imageio_ffmpeg; print(imageio_ffmpeg.get_ffmpeg_exe())"
           $appExe = "EasySaveAudioVideo_v$version"
-          # onedir는 실행 시 전체 앱을 임시 폴더에 풀지 않습니다. UPX로 배포 용량을 줄입니다.
-          python -m PyInstaller --noconfirm --clean --onedir --upx-dir "$env:UPX_DIR" --windowed --name $appExe --icon easy_save_audio.ico --add-data "easy_save_audio.png;." --add-data "easy_save_audio.ico;." --add-binary "$ffmpeg;." --collect-all yt_dlp --collect-all tkinterdnd2 app_v2.py
-          if ($LASTEXITCODE -ne 0) { throw "PyInstaller build failed." }
-          $zipName = "Easy_Save_Audio_Video_v$($version)_Windows_x64.zip"
-          Compress-Archive -Path "dist/$appExe/*" -DestinationPath "dist/$zipName" -CompressionLevel Optimal -Force
-          Write-Host "Created compressed fast-start package dist/$zipName"
-      - name: Upload versioned Windows ZIP
+          # --onefile embeds Python, dependencies, app resources, and FFmpeg in one EXE.
+          # At launch PyInstaller extracts runtime files to a temporary directory; no _internal folder is distributed.
+          python -m PyInstaller --noconfirm --clean --onefile --upx-dir "$env:UPX_DIR" --windowed --name $appExe --icon easy_save_audio.ico --add-data "easy_save_audio.png;." --add-data "easy_save_audio.ico;." --add-binary "$ffmpeg;." --collect-all yt_dlp --collect-all tkinterdnd2 app_v2.py
+          if ($LASTEXITCODE -ne 0) { throw "PyInstaller one-file build failed." }
+          $exePath = "dist/$appExe.exe"
+          if (-not (Test-Path $exePath)) { throw "Single-file executable was not created: $exePath" }
+          $zipName = "Easy_Save_Audio_Video_v$($version)_Windows_x64_OneFile.zip"
+          Compress-Archive -Path $exePath -DestinationPath "dist/$zipName" -CompressionLevel Optimal -Force
+          # Verify the distributable ZIP contains only the single EXE.
+          Add-Type -AssemblyName System.IO.Compression.FileSystem
+          $archive = [System.IO.Compression.ZipFile]::OpenRead((Join-Path (Get-Location) "dist/$zipName"))
+          try {
+            $entries = @($archive.Entries | Where-Object { -not $_.FullName.EndsWith("/") })
+            if ($entries.Count -ne 1 -or $entries[0].Name -ne "$appExe.exe") {
+              throw "The OneFile ZIP must contain exactly one EXE."
+            }
+          } finally {
+            $archive.Dispose()
+          }
+          Write-Host "Created verified single-file package dist/$zipName"
+      - name: Upload single-file Windows ZIP
         uses: actions/upload-artifact@v4
         with:
-          name: Easy-Save-Audio-Video-v${{ steps.build.outputs.version }}-Windows-x64
-          path: dist/Easy_Save_Audio_Video_v${{ steps.build.outputs.version }}_Windows_x64.zip
+          name: Easy-Save-Audio-Video-v${{ steps.build.outputs.version }}-Windows-x64-OneFile
+          path: dist/Easy_Save_Audio_Video_v${{ steps.build.outputs.version }}_Windows_x64_OneFile.zip
           if-no-files-found: error
