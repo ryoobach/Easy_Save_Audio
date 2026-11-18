@@ -129,7 +129,8 @@ class EasySaveApp:
         ttk.Button(title_row, text="ⓘ", command=self.show_about, style="About.TButton", width=3).pack(side="left", padx=(10, 0), pady=2)
 
         self.tabs = ttk.Notebook(title_area)
-        self.tabs.pack(anchor="w", fill="x", pady=(3, 0))
+        # 탭 박스가 아래 작업 목록 영역과 같은 가로 폭을 사용하도록 확장합니다.
+        self.tabs.pack(fill="x", expand=True, pady=(3, 0))
         self.mp3_tab = ttk.Frame(self.tabs, padding=14)
         self.video_tab = ttk.Frame(self.tabs, padding=14)
         self.tabs.add(self.mp3_tab, text="MP3 다운로드")
@@ -262,13 +263,22 @@ class EasySaveApp:
 
     def register_drop_target(self, widget, callback):
         try:
-            from tkinterdnd2 import DND_FILES, DND_TEXT
-            widget.drop_target_register(DND_FILES, DND_TEXT)
+            # 브라우저 주소창/링크 드래그는 파일 드롭과 다른 형식으로 전달될 수 있습니다.
+            # DND_ALL로 URI 목록, HTML, 일반 텍스트 등 다양한 드롭 형식을 받습니다.
+            from tkinterdnd2 import DND_ALL
+            widget.drop_target_register(DND_ALL)
             widget.dnd_bind("<<Drop>>", callback)
             return True
         except Exception as exc:
-            self.dnd_error = str(exc)
-            return False
+            # DND_ALL 등록이 지원되지 않는 환경에서는 파일/텍스트 형식으로 대체합니다.
+            try:
+                from tkinterdnd2 import DND_FILES, DND_TEXT
+                widget.drop_target_register(DND_FILES, DND_TEXT)
+                widget.dnd_bind("<<Drop>>", callback)
+                return True
+            except Exception as fallback_exc:
+                self.dnd_error = f"{exc}; 대체 등록 실패: {fallback_exc}"
+                return False
 
     def handle_window_drop(self, event):
         # A drop on blank space uses the currently selected tab's settings.
