@@ -211,7 +211,7 @@ class EasySaveApp:
         ).pack(side="left", padx=(8, 0))
         self.bind_entry_menu(entry, url_var)
 
-        save_label = "MP3 저장 폴더" if mode == "mp3" else "동영상 저장 폴더"
+        save_label = "저장 폴더"
         folder = tk.StringVar(value=self.settings.get(
             "last_mp3_dir" if mode == "mp3" else "last_video_dir", str(Path.home())
         ))
