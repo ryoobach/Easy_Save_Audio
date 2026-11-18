@@ -22,7 +22,7 @@ except ImportError:
     TkinterDnD = None
 
 APP_NAME = "Easy Save Audio & Video"
-APP_VERSION = "2.0.2"
+APP_VERSION = "2.0.3"
 APPDATA = Path(os.environ.get("APPDATA", str(Path.home()))) / "EasySaveAudio"
 APPDATA.mkdir(parents=True, exist_ok=True)
 SETTINGS_FILE = APPDATA / "settings.json"
@@ -378,6 +378,7 @@ class EasySaveApp:
             folder = self.output_folder("video")
             outtmpl = str(folder / (title + ".%(ext)s"))
             opts = {"format": "bv*+ba/b", "outtmpl": outtmpl, "merge_output_format": "mp4",
+                    "ffmpeg_location": self.ffmpeg,
                     "quiet": True, "no_warnings": True, "noplaylist": True,
                     "progress_hooks": [lambda d: self.ytdlp_progress(job_id, d, cancel)],
                     "retries": 3, "fragment_retries": 3}
