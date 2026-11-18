@@ -260,9 +260,9 @@ class EasySaveApp:
     def handle_drop(self, event, mode, both, url_var):
         # Browsers may include a URL together with a title or other drag metadata.
         raw_data = str(event.data).strip()
-        url_matches = re.findall(r'https?://[^\\s<>"{}|\\\\^\\x60\\[\\]]+', raw_data, flags=re.IGNORECASE)
+        url_matches = re.findall(r'https?://\S+', raw_data, flags=re.IGNORECASE)
         for candidate in url_matches:
-            candidate = candidate.rstrip(".,;:!?)']\\\"")
+            candidate = candidate.rstrip(".,;:!?)']\"}")
             if is_url(candidate):
                 if self.browser_drag_var.get():
                     url_var.set(candidate)
@@ -526,7 +526,7 @@ class EasySaveApp:
                                            row.get("result", ""), row.get("detail", "")))
 
     def show_about(self):
-        messagebox.showinfo("앱 정보", f"{APP_NAME}\n버전 {APP_VERSION}\nWindows 64비트", parent=self.root)
+        messagebox.showinfo("앱 정보", f"{APP_NAME}\n버전 {APP_VERSION}\nWindows 64비트\n\nRyoo jaesang & 최피디", parent=self.root)
 
     def on_close(self):
         self.closing = True
