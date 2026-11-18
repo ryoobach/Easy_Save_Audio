@@ -234,8 +234,8 @@ class EasySaveApp:
         action_row = ttk.Frame(panel)
         action_row.pack(fill="x", pady=(5, 0))
         ttk.Button(
-            action_row, text="변환 시작",
-            command=self.start_current, style="Action.TButton", width=16
+            action_row, text="추출 시작",
+            command=self.start_current, style="Utility.TButton", width=10
         ).pack(side="right")
 
         for widget in (panel, options, input_row, entry, mp3_row, video_row):
