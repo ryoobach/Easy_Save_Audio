@@ -24,7 +24,7 @@ except ImportError:
     TkinterDnD = None
 
 APP_NAME = "Easy Save Audio & Video"
-APP_VERSION = "2.1.7"
+APP_VERSION = "2.1.8"
 APPDATA = Path(os.environ.get("APPDATA", str(Path.home()))) / "EasySaveAudio"
 APPDATA.mkdir(parents=True, exist_ok=True)
 SETTINGS_FILE = APPDATA / "settings.json"
@@ -143,9 +143,17 @@ class EasySaveApp:
 
         self.build_main_panel(outer)
 
+        # 하단 조작 버튼을 먼저 bottom에 고정해 작업 목록이 버튼을 밀어내지 않도록 합니다.
+        controls = ttk.Frame(outer)
+        controls.pack(side="bottom", fill="x", pady=(5, 0))
+        ttk.Button(controls, text="선택 작업 취소", command=self.cancel_selected).pack(side="left")
+        ttk.Button(controls, text="작업 기록", command=self.show_history).pack(side="left", padx=8)
+        ttk.Button(controls, text="진단 로그", command=self.show_diagnostic_log).pack(side="left", padx=2)
+        ttk.Label(controls, text="다운로드 및 변환 작업은 각각 독립적으로 처리됩니다.", foreground="#666").pack(side="right")
+
         queue_header = ttk.Frame(outer)
         # 오른쪽 여백을 탭 안쪽 버튼 영역과 맞춰 버튼 끝선을 통일합니다.
-        queue_header.pack(fill="x", pady=(2, 3))
+        queue_header.pack(side="top", fill="x", pady=(2, 3))
         ttk.Label(queue_header, text="작업 목록").pack(side="left")
         ttk.Button(queue_header, text="완료 작업 지우기", command=self.clear_completed, style="Action.TButton", width=16).pack(side="right", padx=(0, 10))
         self.concurrent_label = ttk.Label(queue_header, text="동시 실행 0개", foreground="#666")
@@ -153,7 +161,7 @@ class EasySaveApp:
 
         columns = ("source", "kind", "status", "progress")
         queue_area = ttk.Frame(outer)
-        queue_area.pack(fill="both", expand=True, padx=0)
+        queue_area.pack(side="top", fill="both", expand=True, padx=0)
         self.tree = ttk.Treeview(queue_area, columns=columns, show="headings", height=6, selectmode="browse")
         self.tree.heading("source", text="파일 / URL")
         self.tree.heading("kind", text="작업")
@@ -168,13 +176,6 @@ class EasySaveApp:
         self.tree.pack(side="left", fill="both", expand=True)
         queue_scroll.pack(side="right", fill="y")
         self.tree.bind("<Delete>", lambda _e: self.cancel_selected())
-
-        controls = ttk.Frame(outer)
-        controls.pack(fill="x", pady=(5, 0))
-        ttk.Button(controls, text="선택 작업 취소", command=self.cancel_selected).pack(side="left")
-        ttk.Button(controls, text="작업 기록", command=self.show_history).pack(side="left", padx=8)
-        ttk.Button(controls, text="진단 로그", command=self.show_diagnostic_log).pack(side="left", padx=2)
-        ttk.Label(controls, text="다운로드 및 변환 작업은 각각 독립적으로 처리됩니다.", foreground="#666").pack(side="right")
 
     def log_event(self, event, **fields):
         # URL query strings and credentials are deliberately excluded from diagnostics.
