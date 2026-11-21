@@ -1,4 +1,5 @@
 import json
+import logging
 import html
 import http.server
 import os
@@ -23,10 +24,11 @@ except ImportError:
     TkinterDnD = None
 
 APP_NAME = "Easy Save Audio & Video"
-APP_VERSION = "2.1.5"
+APP_VERSION = "2.1.6"
 APPDATA = Path(os.environ.get("APPDATA", str(Path.home()))) / "EasySaveAudio"
 APPDATA.mkdir(parents=True, exist_ok=True)
 SETTINGS_FILE = APPDATA / "settings.json"
+DIAGNOSTIC_LOG = APPDATA / "diagnostic.log"
 MAX_HISTORY = 200
 VIDEO_EXTENSIONS = {".mp4", ".mkv", ".mov", ".avi", ".webm", ".m4v", ".wmv", ".flv", ".mpeg", ".mpg"}
 AUDIO_EXTENSIONS = {".mp3", ".wav", ".m4a", ".aac", ".flac", ".ogg", ".opus", ".wma", ".aiff"}
@@ -81,6 +83,14 @@ class EasySaveApp:
         self.root.geometry("800x520")
         self.root.minsize(680, 460)
         self.settings = load_settings()
+        self.logger = logging.getLogger("EasySaveAudio")
+        self.logger.setLevel(logging.INFO)
+        self.logger.handlers.clear()
+        handler = logging.FileHandler(DIAGNOSTIC_LOG, encoding="utf-8")
+        handler.setFormatter(logging.Formatter("%(asctime)s | %(levelname)s | %(message)s"))
+        self.logger.addHandler(handler)
+        self.logger.propagate = False
+        self.logger.info("app_started version=%s platform=windows", APP_VERSION)
         self.events = queue.Queue()
         self.jobs = {}
         self.job_counter = 0
@@ -163,7 +173,40 @@ class EasySaveApp:
         controls.pack(fill="x", pady=(5, 0))
         ttk.Button(controls, text="선택 작업 취소", command=self.cancel_selected).pack(side="left")
         ttk.Button(controls, text="작업 기록", command=self.show_history).pack(side="left", padx=8)
+        ttk.Button(controls, text="로그 기록", command=self.export_diagnostic_log).pack(side="left", padx=2)
         ttk.Label(controls, text="다운로드 및 변환 작업은 각각 독립적으로 처리됩니다.", foreground="#666").pack(side="right")
+
+    def log_event(self, event, **fields):
+        # URL query strings and credentials are deliberately excluded from diagnostics.
+        safe_fields = {}
+        for key, value in fields.items():
+            if key in ("url", "source") and isinstance(value, str):
+                parsed = urllib.parse.urlsplit(value)
+                value = urllib.parse.urlunsplit((parsed.scheme, parsed.netloc, parsed.path, "", ""))
+            safe_fields[key] = value
+        try:
+            self.logger.info("%s %s", event, json.dumps(safe_fields, ensure_ascii=False, default=str))
+            for handler in self.logger.handlers:
+                handler.flush()
+        except Exception:
+            pass
+
+    def export_diagnostic_log(self):
+        try:
+            self.log_event("diagnostic_log_export_requested")
+            destination = filedialog.asksaveasfilename(
+                parent=self.root, title="진단 로그 저장",
+                initialfile="Easy_Save_Audio_Video_Diagnostic_Log.txt",
+                defaultextension=".txt", filetypes=[("텍스트 파일", "*.txt")]
+            )
+            if not destination:
+                return
+            for handler in self.logger.handlers:
+                handler.flush()
+            shutil.copy2(DIAGNOSTIC_LOG, destination)
+            messagebox.showinfo("로그 기록", f"진단 로그를 저장했습니다.\n{destination}", parent=self.root)
+        except Exception as exc:
+            messagebox.showerror("로그 저장 실패", str(exc), parent=self.root)
 
     def register_drop_target(self, widget, callback):
         try:
@@ -458,6 +501,7 @@ class EasySaveApp:
     def run_job(self, job_id):
         job = self.jobs[job_id]
         try:
+            self.log_event("job_started", job_id=job_id, source=job["source"], source_type=job["source_type"], outputs=job["outputs"])
             self.emit(job_id, "처리 중", 0, None)
             source = job["source"]
             source_type = job["source_type"]
@@ -469,12 +513,14 @@ class EasySaveApp:
                 self.emit(job_id, "취소", None, None)
             else:
                 self.emit(job_id, "완료", 100, None)
+                self.log_event("job_completed", job_id=job_id, outputs=job["outputs"])
                 self.record_history(source, "완료", ", ".join(job["outputs"]))
         except Exception as exc:
             if job["cancel"].is_set():
                 self.emit(job_id, "취소", None, None)
                 self.record_history(job["source"], "취소", "사용자가 작업을 취소했습니다.")
             else:
+                self.log_event("job_failed", job_id=job_id, error=str(exc))
                 self.emit(job_id, "오류", None, str(exc))
                 self.record_history(job["source"], "오류", str(exc))
 
@@ -489,8 +535,10 @@ class EasySaveApp:
             return
         is_youtube = urllib.parse.urlparse(url).netloc.lower().endswith(("youtube.com", "youtu.be"))
         info_opts = {"quiet": True, "no_warnings": True, "noplaylist": True, "skip_download": True}
+        self.log_event("media_info_fetch_started", job_id=job_id, source=url, youtube=is_youtube)
         with yt_dlp.YoutubeDL(info_opts) as ydl:
             info = ydl.extract_info(url, download=False)
+        self.log_event("media_info_fetch_completed", job_id=job_id, title=info.get("title"), duration=info.get("duration"))
         title = safe_name(info.get("title") or "media")
         if cancel.is_set():
             return
@@ -524,9 +572,11 @@ class EasySaveApp:
                         "no_warnings": True, "noplaylist": True,
                         "progress_hooks": [lambda d: self.ytdlp_progress(job_id, d, cancel)],
                         "retries": 3, "fragment_retries": 3}
+                self.log_event("audio_download_started", job_id=job_id, source=url, format="bestaudio/best")
                 with yt_dlp.YoutubeDL(opts) as ydl:
                     result = ydl.extract_info(url, download=True)
                     source_file = Path(ydl.prepare_filename(result))
+                self.log_event("audio_download_completed", job_id=job_id, source_file=source_file, filesize=source_file.stat().st_size if source_file.exists() else 0)
                 if not source_file.exists():
                     candidates = list(temp_dir.glob(title + ".*"))
                     source_file = next((p for p in candidates if p.is_file()), None)
@@ -557,6 +607,7 @@ class EasySaveApp:
         command = [self.ffmpeg, "-y", "-hide_banner", "-loglevel", "error", "-i", str(source),
                    "-vn", "-af", "loudnorm=I=-14:TP=-1.0:LRA=11", "-codec:a", "libmp3lame",
                    "-b:a", "320k", str(target)]
+        self.log_event("ffmpeg_encode_started", job_id=job_id, input_file=source, output_file=target, bitrate="320k")
         self.emit(job_id, "MP3 인코딩 중", None, None)
         process = subprocess.Popen(command, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE,
                                    creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
@@ -564,9 +615,31 @@ class EasySaveApp:
             if cancel.wait(0.2):
                 process.terminate()
                 raise RuntimeError("사용자가 작업을 취소했습니다.")
-        if process.returncode != 0 or not target.exists() or target.stat().st_size == 0:
-            error = process.stderr.read().decode("utf-8", errors="replace") if process.stderr else ""
-            raise RuntimeError(error or "MP3 변환에 실패했습니다.")
+        error = process.stderr.read().decode("utf-8", errors="replace") if process.stderr else ""
+        if process.returncode != 0 or not target.exists() or target.stat().st_size < 1024:
+            self.log_event("mp3_validation_failed", job_id=job_id, returncode=process.returncode,
+                           exists=target.exists(), size=target.stat().st_size if target.exists() else 0,
+                           ffmpeg_error=error[-3000:])
+            raise RuntimeError(error or "MP3 변환 결과가 비정상입니다.")
+        # Decode the finished MP3 once more and measure its audio level. This catches
+        # empty/corrupt files and files containing no audio samples before reporting success.
+        verify_cmd = [self.ffmpeg, "-hide_banner", "-i", str(target), "-af", "volumedetect",
+                      "-f", "null", os.devnull]
+        verify = subprocess.run(verify_cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                                text=True, encoding="utf-8", errors="replace",
+                                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+        verify_text = verify.stderr or ""
+        mean_match = re.search(r"mean_volume:\s*(-?inf|[-+]?\d+(?:\.\d+)?)\s*dB", verify_text)
+        duration_match = re.search(r"Duration:\s*(\d{2}:\d{2}:\d{2}(?:\.\d+)?)", verify_text)
+        mean_volume = mean_match.group(1) if mean_match else "unknown"
+        duration = duration_match.group(1) if duration_match else "unknown"
+        self.log_event("mp3_validation", job_id=job_id, size=target.stat().st_size,
+                       duration=duration, mean_volume=mean_volume, decode_returncode=verify.returncode)
+        if verify.returncode != 0 or mean_volume == "inf" or mean_volume == "-inf":
+            target.unlink(missing_ok=True)
+            raise RuntimeError("MP3 검증에 실패했거나 오디오 샘플이 없습니다. 진단 로그를 확인해 주세요.")
+        self.log_event("ffmpeg_encode_completed", job_id=job_id, output_file=target,
+                       size=target.stat().st_size, duration=duration, mean_volume=mean_volume)
 
     def process_local(self, job_id, source, outputs, cancel):
         if cancel.is_set():
