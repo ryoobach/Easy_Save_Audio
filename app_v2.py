@@ -24,7 +24,7 @@ except ImportError:
     TkinterDnD = None
 
 APP_NAME = "Easy Save Audio & Video"
-APP_VERSION = "2.1.9"
+APP_VERSION = "2.2.0"
 APPDATA = Path(os.environ.get("APPDATA", str(Path.home()))) / "EasySaveAudio"
 APPDATA.mkdir(parents=True, exist_ok=True)
 SETTINGS_FILE = APPDATA / "settings.json"
@@ -114,6 +114,7 @@ class EasySaveApp:
         style.configure("Utility.TButton", padding=(10, 6))
         style.configure("Action.TButton", padding=(10, 6), font=("Malgun Gothic", 9))
         style.configure("About.TButton", padding=(4, 0), font=("Segoe UI", 18, "bold"))
+        style.configure("Icon.TButton", padding=(7, 5), font=("Segoe UI Symbol", 10), width=10)
         outer = ttk.Frame(self.root, padding=(16, 10))
         outer.pack(fill="both", expand=True)
 
@@ -146,9 +147,11 @@ class EasySaveApp:
         # 하단 조작 버튼을 먼저 bottom에 고정해 작업 목록이 버튼을 밀어내지 않도록 합니다.
         controls = ttk.Frame(outer)
         controls.pack(side="bottom", fill="x", pady=(5, 0))
-        ttk.Button(controls, text="선택 작업 취소", command=self.cancel_selected).pack(side="left")
-        ttk.Button(controls, text="작업 기록", command=self.show_history).pack(side="left", padx=8)
-        ttk.Button(controls, text="진단 로그", command=self.show_diagnostic_log).pack(side="left", padx=2)
+        # 하단 기능은 아이콘을 위에, 기능명을 아래에 배치해 한눈에 구분합니다.
+        ttk.Button(controls, text="✕\n작업 취소", command=self.cancel_selected, style="Icon.TButton").pack(side="left", padx=(0, 5))
+        ttk.Button(controls, text="▤\n작업 기록", command=self.show_history, style="Icon.TButton").pack(side="left", padx=5)
+        ttk.Button(controls, text="⌕\n파일 진단", command=self.run_file_diagnostic, style="Icon.TButton").pack(side="left", padx=5)
+        ttk.Button(controls, text="☷\n진단 로그", command=self.show_diagnostic_log, style="Icon.TButton").pack(side="left", padx=5)
         ttk.Label(controls, text="다운로드 및 변환 작업은 각각 독립적으로 처리됩니다.", foreground="#666").pack(side="right")
 
         queue_header = ttk.Frame(outer)
@@ -163,7 +166,7 @@ class EasySaveApp:
         queue_area = ttk.Frame(outer)
         queue_area.pack(side="top", fill="both", expand=True, padx=0)
         self.tree = ttk.Treeview(queue_area, columns=columns, show="headings", height=6, selectmode="browse")
-        self.tree.heading("source", text="파일 / URL")
+        self.tree.heading("source", text="콘텐츠 제목 / 파일명")
         self.tree.heading("kind", text="작업")
         self.tree.heading("status", text="상태")
         self.tree.heading("progress", text="진행률")
@@ -191,6 +194,76 @@ class EasySaveApp:
                 handler.flush()
         except Exception:
             pass
+
+
+    def run_file_diagnostic(self):
+        path = filedialog.askopenfilename(
+            parent=self.root, title="검사할 MP3 파일 선택",
+            filetypes=[("MP3 오디오", "*.mp3"), ("모든 파일", "*.*")]
+        )
+        if not path:
+            return
+        self.log_event("manual_mp3_diagnostic_started", source=path)
+        self.executor.submit(self._diagnose_mp3_file, Path(path))
+
+    def _diagnose_mp3_file(self, path):
+        result = {
+            "path": str(path), "size": path.stat().st_size if path.exists() else 0,
+            "codec": "unknown", "sample_rate": 0, "channels": "unknown",
+            "mean_volume": "unknown", "decode_returncode": -1, "error": ""
+        }
+        try:
+            command = [
+                self.ffmpeg, "-hide_banner", "-xerror", "-err_detect", "explode",
+                "-i", str(path), "-map", "0:a:0", "-af", "volumedetect",
+                "-f", "null", os.devnull
+            ]
+            check = subprocess.run(
+                command, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                text=True, encoding="utf-8", errors="replace", timeout=900,
+                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0)
+            )
+            output = check.stderr or ""
+            stream = re.search(r"Audio:\\s*([^,\\s]+),\\s*(\\d+)\\s*Hz,\\s*([^,\\r\\n]+)", output, re.I)
+            volume = re.search(r"mean_volume:\\s*(-?inf|[-+]?\\d+(?:\\.\\d+)?)\\s*dB", output)
+            if stream:
+                result["codec"] = stream.group(1).lower()
+                result["sample_rate"] = int(stream.group(2))
+                result["channels"] = stream.group(3).split(",")[0].strip().lower()
+            if volume:
+                result["mean_volume"] = volume.group(1)
+            result["decode_returncode"] = check.returncode
+            result["error"] = output[-2500:] if check.returncode else ""
+            result["passed"] = (
+                check.returncode == 0 and result["codec"] == "mp3"
+                and result["sample_rate"] == 44100 and result["channels"] == "stereo"
+                and result["mean_volume"] not in ("unknown", "inf", "-inf")
+            )
+        except Exception as exc:
+            result["error"] = str(exc)
+            result["passed"] = False
+        self.log_event("manual_mp3_diagnostic_completed", **result)
+        self.root.after(0, lambda data=result: self._show_mp3_diagnostic_result(data))
+
+    def _show_mp3_diagnostic_result(self, result):
+        status = "검사 통과" if result.get("passed") else "검사에서 문제 발견"
+        message = (
+            f"{status}\n\n파일: {Path(result['path']).name}\n"
+            f"크기: {result['size']:,} bytes\n"
+            f"코덱: {result['codec']}\n"
+            f"샘플레이트: {result['sample_rate']} Hz\n"
+            f"채널: {result['channels']}\n"
+            f"평균 음량: {result['mean_volume']} dB\n"
+            f"전체 디코딩 종료 코드: {result['decode_returncode']}\n\n"
+            "상세 내용은 [진단 로그]에서 확인할 수 있습니다."
+        )
+        if result.get("passed"):
+            messagebox.showinfo("MP3 파일 진단", message, parent=self.root)
+        else:
+            detail = result.get("error", "")
+            if detail:
+                message += "\n\n오류 내용 일부:\n" + detail[-1200:]
+            messagebox.showwarning("MP3 파일 진단", message, parent=self.root)
 
     def show_diagnostic_log(self):
         for handler in self.logger.handlers:
@@ -530,10 +603,10 @@ class EasySaveApp:
                 return
         self.job_counter += 1
         job_id = str(self.job_counter)
-        name = Path(source).name if source_type == "local" else source
+        name = Path(source).name if source_type == "local" else "제목 확인 중…"
         kind = "+".join("MP3" if x == "mp3" else "동영상" for x in outputs)
         job = {"id": job_id, "source": source, "source_type": source_type, "outputs": outputs,
-               "cancel": threading.Event(), "status": "대기 중", "progress": 0,
+               "display_name": name, "cancel": threading.Event(), "status": "대기 중", "progress": 0,
                "started": time.time(), "submitted": False}
         self.jobs[job_id] = job
         # 최신 등록 작업을 항상 목록 맨 위에 표시합니다.
@@ -541,8 +614,8 @@ class EasySaveApp:
         self.tree.yview_moveto(0)
         # Queue only; execution starts after the user presses [변환 시작].
 
-    def emit(self, job_id, status=None, progress=None, detail=None):
-        self.events.put((job_id, status, progress, detail))
+    def emit(self, job_id, status=None, progress=None, detail=None, title=None):
+        self.events.put((job_id, status, progress, detail, title))
 
     def run_job(self, job_id):
         job = self.jobs[job_id]
@@ -585,7 +658,10 @@ class EasySaveApp:
         with yt_dlp.YoutubeDL(info_opts) as ydl:
             info = ydl.extract_info(url, download=False)
         self.log_event("media_info_fetch_completed", job_id=job_id, title=info.get("title"), duration=info.get("duration"))
-        title = safe_name(info.get("title") or "media")
+        raw_title = str(info.get("title") or "").strip()
+        title = safe_name(raw_title or "media")
+        display_title = safe_name(raw_title) if raw_title else url
+        self.emit(job_id, title=display_title)
         if cancel.is_set():
             return
         video_file = None
@@ -732,10 +808,16 @@ class EasySaveApp:
     def poll_events(self):
         try:
             while True:
-                job_id, status, progress, detail = self.events.get_nowait()
+                job_id, status, progress, detail, title = self.events.get_nowait()
                 if job_id not in self.jobs:
                     continue
                 job = self.jobs[job_id]
+                if title is not None:
+                    job["display_name"] = title
+                    if self.tree.exists(job_id):
+                        row_values = list(self.tree.item(job_id, "values"))
+                        row_values[0] = title
+                        self.tree.item(job_id, values=row_values)
                 if status:
                     job["status"] = status
                 self.update_concurrency_label()
