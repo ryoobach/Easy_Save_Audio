@@ -224,8 +224,8 @@ class EasySaveApp:
                 creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0)
             )
             output = check.stderr or ""
-            stream = re.search(r"Audio:\\s*([^,\\s]+),\\s*(\\d+)\\s*Hz,\\s*([^,\\r\\n]+)", output, re.I)
-            volume = re.search(r"mean_volume:\\s*(-?inf|[-+]?\\d+(?:\\.\\d+)?)\\s*dB", output)
+            stream = re.search(r"Audio:\s*([^,\s]+),\s*(\d+)\s*Hz,\s*([^\r\n,]+)", output, re.I)
+            volume = re.search(r"mean_volume:\s*(-?inf|[-+]?\d+(?:\.\d+)?)\s*dB", output)
             if stream:
                 result["codec"] = stream.group(1).lower()
                 result["sample_rate"] = int(stream.group(2))
