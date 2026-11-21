@@ -24,7 +24,7 @@ except ImportError:
     TkinterDnD = None
 
 APP_NAME = "Easy Save Audio & Video"
-APP_VERSION = "2.1.6"
+APP_VERSION = "2.1.7"
 APPDATA = Path(os.environ.get("APPDATA", str(Path.home()))) / "EasySaveAudio"
 APPDATA.mkdir(parents=True, exist_ok=True)
 SETTINGS_FILE = APPDATA / "settings.json"
@@ -173,7 +173,7 @@ class EasySaveApp:
         controls.pack(fill="x", pady=(5, 0))
         ttk.Button(controls, text="선택 작업 취소", command=self.cancel_selected).pack(side="left")
         ttk.Button(controls, text="작업 기록", command=self.show_history).pack(side="left", padx=8)
-        ttk.Button(controls, text="로그 기록", command=self.export_diagnostic_log).pack(side="left", padx=2)
+        ttk.Button(controls, text="진단 로그", command=self.show_diagnostic_log).pack(side="left", padx=2)
         ttk.Label(controls, text="다운로드 및 변환 작업은 각각 독립적으로 처리됩니다.", foreground="#666").pack(side="right")
 
     def log_event(self, event, **fields):
@@ -191,22 +191,67 @@ class EasySaveApp:
         except Exception:
             pass
 
-    def export_diagnostic_log(self):
+    def show_diagnostic_log(self):
+        for handler in self.logger.handlers:
+            handler.flush()
+        win = tk.Toplevel(self.root)
+        win.title("진단 로그")
+        win.geometry("780x480")
+        win.minsize(600, 360)
+        win.transient(self.root)
+
+        outer = ttk.Frame(win, padding=10)
+        outer.pack(fill="both", expand=True)
+        log_view = tk.Text(outer, wrap="word", font=("Consolas", 9), state="normal")
+        scrollbar = ttk.Scrollbar(outer, orient="vertical", command=log_view.yview)
+        log_view.configure(yscrollcommand=scrollbar.set)
+        log_view.pack(side="left", fill="both", expand=True)
+        scrollbar.pack(side="right", fill="y")
+
         try:
-            self.log_event("diagnostic_log_export_requested")
-            destination = filedialog.asksaveasfilename(
-                parent=self.root, title="진단 로그 저장",
-                initialfile="Easy_Save_Audio_Video_Diagnostic_Log.txt",
-                defaultextension=".txt", filetypes=[("텍스트 파일", "*.txt")]
-            )
-            if not destination:
-                return
-            for handler in self.logger.handlers:
-                handler.flush()
-            shutil.copy2(DIAGNOSTIC_LOG, destination)
-            messagebox.showinfo("로그 기록", f"진단 로그를 저장했습니다.\n{destination}", parent=self.root)
+            content = DIAGNOSTIC_LOG.read_text(encoding="utf-8") if DIAGNOSTIC_LOG.exists() else ""
         except Exception as exc:
-            messagebox.showerror("로그 저장 실패", str(exc), parent=self.root)
+            content = f"로그 파일을 읽지 못했습니다: {exc}"
+        log_view.insert("1.0", content or "기록된 진단 로그가 없습니다.")
+        log_view.configure(state="disabled")
+
+        buttons = ttk.Frame(win, padding=(10, 0, 10, 10))
+        buttons.pack(fill="x")
+
+        def copy_log():
+            try:
+                win.clipboard_clear()
+                win.clipboard_append(content)
+                win.update()
+                messagebox.showinfo("진단 로그", "로그 내용을 클립보드에 복사했습니다.", parent=win)
+                self.log_event("diagnostic_log_copied")
+            except Exception as exc:
+                messagebox.showerror("로그 복사 실패", str(exc), parent=win)
+
+        def save_log():
+            try:
+                destination = filedialog.asksaveasfilename(
+                    parent=win, title="진단 로그 저장",
+                    initialfile="Easy_Save_Audio_Video_Diagnostic_Log.txt",
+                    defaultextension=".txt", filetypes=[("텍스트 파일", "*.txt")]
+                )
+                if not destination:
+                    return
+                for handler in self.logger.handlers:
+                    handler.flush()
+                shutil.copy2(DIAGNOSTIC_LOG, destination)
+                messagebox.showinfo("진단 로그", f"로그를 저장했습니다.\n{destination}", parent=win)
+                self.log_event("diagnostic_log_saved", destination=destination)
+            except Exception as exc:
+                messagebox.showerror("로그 저장 실패", str(exc), parent=win)
+
+        ttk.Button(buttons, text="복사", command=copy_log, style="Action.TButton").pack(side="left")
+        ttk.Button(buttons, text="저장", command=save_log, style="Action.TButton").pack(side="left", padx=8)
+        ttk.Button(buttons, text="취소", command=win.destroy, style="Action.TButton").pack(side="right")
+        win.protocol("WM_DELETE_WINDOW", win.destroy)
+        win.grab_set()
+        win.focus_set()
+
 
     def register_drop_target(self, widget, callback):
         try:
@@ -605,8 +650,10 @@ class EasySaveApp:
         if target.exists():
             target = target.with_name(target.stem + "_" + datetime.now().strftime("%H%M%S") + target.suffix)
         command = [self.ffmpeg, "-y", "-hide_banner", "-loglevel", "error", "-i", str(source),
-                   "-vn", "-af", "loudnorm=I=-14:TP=-1.0:LRA=11", "-codec:a", "libmp3lame",
-                   "-b:a", "320k", str(target)]
+                   "-map", "0:a:0", "-vn", "-map_metadata", "-1",
+                   "-af", "loudnorm=I=-14:TP=-1.0:LRA=11", "-codec:a", "libmp3lame",
+                   "-b:a", "320k", "-ar", "44100", "-ac", "2",
+                   "-write_xing", "1", "-id3v2_version", "3", "-f", "mp3", str(target)]
         self.log_event("ffmpeg_encode_started", job_id=job_id, input_file=source, output_file=target, bitrate="320k")
         self.emit(job_id, "MP3 인코딩 중", None, None)
         process = subprocess.Popen(command, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE,
