@@ -24,7 +24,7 @@ except ImportError:
     TkinterDnD = None
 
 APP_NAME = "Easy Save Audio & Video"
-APP_VERSION = "2.1.8"
+APP_VERSION = "2.1.9"
 APPDATA = Path(os.environ.get("APPDATA", str(Path.home()))) / "EasySaveAudio"
 APPDATA.mkdir(parents=True, exist_ok=True)
 SETTINGS_FILE = APPDATA / "settings.json"
@@ -669,9 +669,11 @@ class EasySaveApp:
                            exists=target.exists(), size=target.stat().st_size if target.exists() else 0,
                            ffmpeg_error=error[-3000:])
             raise RuntimeError(error or "MP3 변환 결과가 비정상입니다.")
-        # Decode the finished MP3 once more and measure its audio level. This catches
-        # empty/corrupt files and files containing no audio samples before reporting success.
-        verify_cmd = [self.ffmpeg, "-hide_banner", "-i", str(target), "-af", "volumedetect",
+        # Strictly decode the entire output and verify its stream properties before
+        # marking the job successful. Winamp compatibility requires a conventional
+        # MPEG Layer III stream, 44.1 kHz stereo, and actual decoded audio samples.
+        verify_cmd = [self.ffmpeg, "-hide_banner", "-xerror", "-err_detect", "explode",
+                      "-i", str(target), "-map", "0:a:0", "-af", "volumedetect",
                       "-f", "null", os.devnull]
         verify = subprocess.run(verify_cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                                 text=True, encoding="utf-8", errors="replace",
@@ -679,15 +681,27 @@ class EasySaveApp:
         verify_text = verify.stderr or ""
         mean_match = re.search(r"mean_volume:\s*(-?inf|[-+]?\d+(?:\.\d+)?)\s*dB", verify_text)
         duration_match = re.search(r"Duration:\s*(\d{2}:\d{2}:\d{2}(?:\.\d+)?)", verify_text)
+        stream_match = re.search(r"Audio:\s*([^,\s]+),\s*(\d+)\s*Hz,\s*([^,\r\n]+)", verify_text, re.I)
         mean_volume = mean_match.group(1) if mean_match else "unknown"
         duration = duration_match.group(1) if duration_match else "unknown"
+        codec = stream_match.group(1).lower() if stream_match else "unknown"
+        sample_rate = int(stream_match.group(2)) if stream_match else 0
+        channel_layout = stream_match.group(3).split(",")[0].strip().lower() if stream_match else "unknown"
         self.log_event("mp3_validation", job_id=job_id, size=target.stat().st_size,
-                       duration=duration, mean_volume=mean_volume, decode_returncode=verify.returncode)
-        if verify.returncode != 0 or mean_volume == "inf" or mean_volume == "-inf":
+                       duration=duration, codec=codec, sample_rate=sample_rate,
+                       channel_layout=channel_layout, mean_volume=mean_volume,
+                       decode_returncode=verify.returncode)
+        if (verify.returncode != 0 or codec != "mp3" or sample_rate != 44100
+                or channel_layout != "stereo" or mean_volume in ("unknown", "inf", "-inf")):
             target.unlink(missing_ok=True)
-            raise RuntimeError("MP3 검증에 실패했거나 오디오 샘플이 없습니다. 진단 로그를 확인해 주세요.")
+            raise RuntimeError(
+                "MP3 표준 규격 또는 오디오 검증에 실패했습니다. "
+                "진단 로그에서 코덱·샘플레이트·채널·음량 정보를 확인해 주세요."
+            )
         self.log_event("ffmpeg_encode_completed", job_id=job_id, output_file=target,
-                       size=target.stat().st_size, duration=duration, mean_volume=mean_volume)
+                       size=target.stat().st_size, duration=duration, codec=codec,
+                       sample_rate=sample_rate, channel_layout=channel_layout,
+                       mean_volume=mean_volume)
 
     def process_local(self, job_id, source, outputs, cancel):
         if cancel.is_set():
