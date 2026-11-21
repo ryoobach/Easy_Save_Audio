@@ -29,7 +29,7 @@ jobs:
           $versionMatch = Select-String -Path app_v2.py -Pattern '^APP_VERSION = "([^"]+)"'
           if (-not $versionMatch) { throw "APP_VERSION was not found in app_v2.py" }
           $version = $versionMatch.Matches[0].Groups[1].Value
-          if ($version -ne "2.1.8") { throw "Expected version 2.1.8, found $version" }
+          if ($version -ne "2.1.9") { throw "Expected version 2.1.9, found $version" }
           "version=$version" >> $env:GITHUB_OUTPUT
           $ffmpeg = python -c "import imageio_ffmpeg; print(imageio_ffmpeg.get_ffmpeg_exe())"
           $appExe = "EasySaveAudioVideo_v$version"
