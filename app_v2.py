@@ -25,7 +25,7 @@ except ImportError:
     TkinterDnD = None
 
 APP_NAME = "Easy Save Audio & Video"
-APP_VERSION = "2.2.5"
+APP_VERSION = "2.2.6"
 APPDATA = Path(os.environ.get("APPDATA", str(Path.home()))) / "EasySaveAudio"
 APPDATA.mkdir(parents=True, exist_ok=True)
 SETTINGS_FILE = APPDATA / "settings.json"
@@ -104,8 +104,8 @@ class EasySaveApp:
         self.logger = logging.getLogger("EasySaveAudio")
         self.logger.setLevel(logging.INFO)
         self.logger.handlers.clear()
-        # Append forever: no RotatingFileHandler, size cap, backup count, or automatic deletion.
-        handler = logging.FileHandler(DIAGNOSTIC_LOG, mode="a", encoding="utf-8", delay=False)
+        # Start each application session with a clean log; records append for the lifetime of this run.
+        handler = logging.FileHandler(DIAGNOSTIC_LOG, mode="w", encoding="utf-8", delay=False)
         handler.setFormatter(logging.Formatter("%(asctime)s | %(levelname)s | %(message)s"))
         self.logger.addHandler(handler)
         self.logger.propagate = False
@@ -113,8 +113,9 @@ class EasySaveApp:
         try:
             existing_log_size = DIAGNOSTIC_LOG.stat().st_size if DIAGNOSTIC_LOG.exists() else 0
             self.logger.info("diagnostic_log_storage %s", json.dumps({
-                "append_mode": True, "rotation_enabled": False, "size_limit_bytes": None,
-                "existing_size_bytes": existing_log_size
+                "startup_reset": True, "append_mode_within_session": True,
+                "rotation_enabled": False, "size_limit_bytes": None,
+                "existing_size_bytes_after_startup": existing_log_size
             }))
             for active_handler in self.logger.handlers:
                 active_handler.flush()
