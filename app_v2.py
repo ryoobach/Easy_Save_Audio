@@ -25,7 +25,7 @@ except ImportError:
     TkinterDnD = None
 
 APP_NAME = "Easy Save Audio & Video"
-APP_VERSION = "2.3.6"
+APP_VERSION = "2.3.7"
 MP3_TEST_PROFILE = "BASELINE"
 APPDATA = Path(os.environ.get("APPDATA", str(Path.home()))) / "EasySaveAudio"
 APPDATA.mkdir(parents=True, exist_ok=True)
@@ -91,6 +91,20 @@ def ffprobe_path(ffmpeg=None):
             return str(candidate)
     return None
 
+
+def lame_path():
+    candidates = []
+    if getattr(sys, "frozen", False):
+        base = Path(getattr(sys, "_MEIPASS", Path(sys.executable).parent))
+        candidates.extend([base / "lame.exe", Path(sys.executable).parent / "lame.exe"])
+    else:
+        base = Path(__file__).resolve().parent
+        candidates.extend([base / "lame.exe", base / "tools" / "lame.exe"])
+    for candidate in candidates:
+        if candidate.is_file():
+            return str(candidate)
+    return None
+
 def is_url(value):
     parsed = urllib.parse.urlparse(value)
     return parsed.scheme in ("http", "https") and bool(parsed.netloc)
@@ -105,18 +119,17 @@ class EasySaveApp:
         self.logger = logging.getLogger("EasySaveAudio")
         self.logger.setLevel(logging.INFO)
         self.logger.handlers.clear()
-        # Keep one diagnostic log across application restarts; append without rotation or size limit.
-        handler = logging.FileHandler(DIAGNOSTIC_LOG, mode="a", encoding="utf-8", delay=False)
+        # Start each application session with a fresh diagnostic log.
+        handler = logging.FileHandler(DIAGNOSTIC_LOG, mode="w", encoding="utf-8", delay=False)
         handler.setFormatter(logging.Formatter("%(asctime)s | %(levelname)s | %(message)s"))
         self.logger.addHandler(handler)
         self.logger.propagate = False
         self.logger.info("app_started version=%s platform=windows", APP_VERSION)
         try:
-            existing_log_size = DIAGNOSTIC_LOG.stat().st_size if DIAGNOSTIC_LOG.exists() else 0
             self.logger.info("diagnostic_log_storage %s", json.dumps({
-                "startup_reset": False, "append_mode_within_session": True,
+                "startup_reset": True, "append_mode_within_session": True,
                 "rotation_enabled": False, "size_limit_bytes": None,
-                "existing_size_bytes_after_startup": existing_log_size
+                "existing_size_bytes_after_startup": 0
             }))
             for active_handler in self.logger.handlers:
                 active_handler.flush()
@@ -129,6 +142,7 @@ class EasySaveApp:
         self.executor = ThreadPoolExecutor(max_workers=2, thread_name_prefix="media-job")
         self.ffmpeg = ffmpeg_path()
         self.ffprobe = ffprobe_path(self.ffmpeg)
+        self.lame = lame_path()
         self.closing = False
         self.dnd_error = None
         self.build_ui()
@@ -1118,16 +1132,19 @@ class EasySaveApp:
             if cancel.is_set():
                 raise RuntimeError("사용자가 작업을 취소했습니다.")
 
+            decode_filter_options = ["-af", "loudnorm=I=-14:TP=-1.0:LRA=11"] if cfg["loudnorm"] else []
             decode_command = [
                 self.ffmpeg, "-y", "-hide_banner", "-loglevel", "error",
                 "-i", str(source), "-map", "0:a:0", "-vn",
+                *decode_filter_options,
                 "-c:a", "pcm_s16le", "-ar", str(pcm_sample_rate), "-ac", str(output_channels),
                 "-f", "wav", str(pcm_path)
             ]
             self.log_event(
                 "source_audio_pcm_decode_started", job_id=job_id,
                 source_file=source, source_audio_codec=source_audio.get("codec", "unknown"),
-                intermediate_format="pcm_s16le_wav", sample_rate=pcm_sample_rate, channels=2
+                intermediate_format="pcm_s16le_wav", sample_rate=pcm_sample_rate, channels=output_channels,
+                loudnorm=("enabled" if cfg["loudnorm"] else "disabled")
             )
             self.emit(job_id, "원본 오디오 디코딩 중", None, None)
             process = subprocess.Popen(
@@ -1156,32 +1173,50 @@ class EasySaveApp:
 
             if cancel.is_set():
                 raise RuntimeError("사용자가 작업을 취소했습니다.")
-            # J-S are isolated Winamp compatibility tests. Each executable embeds one profile.
-            encode_options = [
-                "-reservoir", cfg["reservoir"], "-ar", str(pcm_sample_rate),
-                "-ac", str(output_channels), "-write_xing", cfg["xing"],
-                "-id3v2_version", cfg["id3"]
-            ]
+            # The PCM WAV is now encoded by the standalone LAME executable, not FFmpeg's libmp3lame wrapper.
+            if not self.lame or not Path(self.lame).is_file():
+                raise RuntimeError("독립 실행형 LAME(lame.exe)를 찾을 수 없습니다. 앱 패키지의 _internal 폴더를 확인해 주세요.")
+
+            encode_command = [self.lame, "--silent", "--noreplaygain", "--nohist"]
+            if cfg["reservoir"] == "0":
+                encode_command.append("--nores")
             if cfg["vbr"]:
-                encode_options.extend(["-q:a", "2"])
+                encode_command.extend(["-V", "2"])
                 bitrate_label = "VBR quality 2"
+                rate_control_label = "VBR"
             else:
-                encode_options.extend(["-b:a", cfg["bitrate"]])
+                encode_command.extend(["--cbr", "-b", str(int(cfg["bitrate"].lower().removesuffix("k")))])
                 bitrate_label = f'{cfg["bitrate"]} CBR'
-            audio_filter_options = ["-af", "loudnorm=I=-14:TP=-1.0:LRA=11"] if cfg["loudnorm"] else []
-            encode_command = [
-                self.ffmpeg, "-y", "-hide_banner", "-loglevel", "error",
-                "-i", str(pcm_path), "-map", "0:a:0", "-vn", "-map_metadata", "-1",
-                *audio_filter_options, "-codec:a", "libmp3lame",
-                *encode_options, "-f", "mp3", str(target)
-            ]
+                rate_control_label = "CBR"
+            encode_command.extend(["-m", "m" if output_channels == 1 else "s"])
+            if cfg["xing"] == "0":
+                encode_command.append("-t")
+            if cfg["id3"] == "3":
+                encode_command.extend([
+                    "--id3v2-only", "--tt", Path(source).stem[:30]
+                ])
+            encode_command.extend([str(pcm_path), str(target)])
+
+            version_result = subprocess.run(
+                [self.lame, "--version"], stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                text=True, encoding="utf-8", errors="replace", timeout=15,
+                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0)
+            )
+            encoder_version = (version_result.stdout or "").strip().splitlines()[:3]
             self.log_event(
-                "ffmpeg_encode_started", job_id=job_id, input_file=source,
+                "lame_encoder_selected", encoder_binary=self.lame,
+                encoder_version=encoder_version, encoder_version_returncode=version_result.returncode
+            )
+            self.log_event(
+                "lame_encode_started", job_id=job_id, input_file=source,
                 intermediate_file=pcm_path, output_file=target, bitrate=bitrate_label,
-                compatibility_profile=f"v2.3.6_{selected_profile}",
+                compatibility_profile=f"v2.3.7_{selected_profile}",
+                encoder="standalone_lame", encoder_version=encoder_version,
                 output_sample_rate=pcm_sample_rate, output_channels=output_channels,
-                loudnorm=("disabled" if selected_profile == "H_NO_LOUDNORM" else "enabled"),
-                mp3_rate_control=("VBR quality 2" if selected_profile == "F_VBR_Q2" else "CBR"),
+                loudnorm=("enabled" if cfg["loudnorm"] else "disabled"),
+                mp3_rate_control=rate_control_label, reservoir=cfg["reservoir"],
+                xing_tag=cfg["xing"], id3_mode=cfg["id3"],
+                command_arguments=encode_command[1:],
                 source_audio_codec=source_audio.get("codec", "unknown")
             )
             self.emit(job_id, "MP3 인코딩 중", None, None)
@@ -1202,9 +1237,9 @@ class EasySaveApp:
                 self.log_event(
                     "mp3_encode_failed", job_id=job_id, returncode=process.returncode,
                     exists=target.exists(), size=target.stat().st_size if target.exists() else 0,
-                    ffmpeg_error=error[-3000:]
+                    lame_error=error[-3000:]
                 )
-                raise RuntimeError(error or "MP3 변환 결과 파일을 만들지 못했습니다.")
+                raise RuntimeError(error or "독립 실행형 LAME MP3 변환에 실패했습니다.")
 
             # Preserve the successfully encoded output even if post-encode diagnostics fail.
             inspection = self._inspect_mp3_file(target)
@@ -1236,12 +1271,12 @@ class EasySaveApp:
             if validation_reasons:
                 self.log_event("mp3_diagnostic_warning_output_preserved", **fields)
             self.log_event(
-                "ffmpeg_encode_completed", job_id=job_id, output_file=target,
+                "lame_encode_completed", job_id=job_id, output_file=target,
                 size=inspection["size"], duration=inspection["duration"],
                 codec=inspection["codec"], sample_rate=inspection["sample_rate"],
                 channels=inspection["channels"], mean_volume=inspection["mean_volume"],
                 source_audio_codec=source_audio.get("codec", "unknown"),
-                intermediate_format="pcm_s16le_wav"
+                intermediate_format="pcm_s16le_wav", encoder="standalone_lame"
             )
         finally:
             try:
