@@ -61,7 +61,7 @@ jobs:
             $entries = @($archive.Entries | Where-Object { -not $_.FullName.EndsWith("/") })
             $hasExe = @($entries | Where-Object { $_.FullName -eq "$appExe/$appExe.exe" }).Count -eq 1
             $hasInternal = @($entries | Where-Object { $_.FullName -like "$appExe/_internal/*" }).Count -gt 0
-            $hasManual = @($entries | Where-Object { $_.FullName -eq "$appExe/Easy_Save_Audio_Video_기능설명서_v2.2.5.md" }).Count -eq 1
+            $hasManual = @($entries | Where-Object { $_.FullName -eq "$appExe/Easy_Save_Audio_Video_기능설명서_v2.2.6.md" }).Count -eq 1
             if (-not $hasExe -or -not $hasInternal -or -not $hasManual) {
               throw "Onedir ZIP verification failed: launcher, _internal files, or feature manual are missing."
             }
