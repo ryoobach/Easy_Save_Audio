@@ -1,24 +1,17 @@
 name: Build Easy Save Audio & Video (Windows x64)
-# v2.3.6 builds four isolated Winamp compatibility test variants.
+# Build ten MP3 compatibility EXEs into one shared onedir application folder.
 on:
   push:
     branches: [ main ]
   workflow_dispatch:
 
-# 새 커밋이 들어오면 이전 빌드를 취소하고 최신 소스만 빌드합니다.
 concurrency:
   group: easy-save-audio-windows-build
   cancel-in-progress: true
 
 jobs:
   build:
-    strategy:
-      fail-fast: false
-      matrix:
-        profile: [E_CBR_192K, F_VBR_Q2, G_48KHZ, H_NO_LOUDNORM, I_RESERVOIR_NO_XING]
     runs-on: windows-latest
-    env:
-      MP3_TEST_PROFILE: ${{ matrix.profile }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -29,58 +22,68 @@ jobs:
         run: python -m pip install -r requirements.txt
       - name: Create application icon
         run: python make_icon.py
-      - name: Verify generated icon
-        shell: pwsh
-        run: |
-          if (-not (Test-Path "easy_save_audio.ico")) { throw "easy_save_audio.ico was not generated." }
-          if ((Get-Item "easy_save_audio.ico").Length -lt 1024) { throw "Generated ICO is unexpectedly small." }
-      - name: Build Windows onedir application
-        id: build
+      - name: Build ten profile executables into one folder
         shell: pwsh
         run: |
           $versionMatch = Select-String -Path app_v2.py -Pattern '^APP_VERSION = "([^"]+)"'
           if (-not $versionMatch) { throw "APP_VERSION was not found in app_v2.py" }
           $version = $versionMatch.Matches[0].Groups[1].Value
           if ($version -ne "2.3.6") { throw "Expected version 2.3.6, found $version" }
-          "version=$version" >> $env:GITHUB_OUTPUT
+          $baseSource = Get-Content app_v2.py -Raw
           $ffmpeg = python -c "import imageio_ffmpeg; print(imageio_ffmpeg.get_ffmpeg_exe())"
-          # imageio-ffmpeg bundles ffmpeg.exe only. Download ffprobe.exe separately.
           $ffprobeZip = Join-Path $env:RUNNER_TEMP "ffmpeg-essentials.zip"
           $ffprobeExtract = Join-Path $env:RUNNER_TEMP "ffmpeg-essentials"
           Invoke-WebRequest -Uri "https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-essentials.zip" -OutFile $ffprobeZip
           Expand-Archive -Path $ffprobeZip -DestinationPath $ffprobeExtract -Force
           $ffprobeItem = Get-ChildItem -Path $ffprobeExtract -Filter "ffprobe.exe" -Recurse | Select-Object -First 1
-          if (-not $ffprobeItem) { throw "ffprobe.exe was not found in the downloaded package." }
+          if (-not $ffprobeItem) { throw "ffprobe.exe was not found." }
           $ffprobe = $ffprobeItem.FullName
-          $appExe = "EasySaveAudioVideo_v$version-$env:MP3_TEST_PROFILE"
-          $sourceText = Get-Content app_v2.py -Raw
-          $sourceText = $sourceText.Replace('MP3_TEST_PROFILE = "BASELINE"', "MP3_TEST_PROFILE = `"$env:MP3_TEST_PROFILE`"")
-          [System.IO.File]::WriteAllText((Join-Path (Get-Location) "app_v2.py"), $sourceText, [System.Text.UTF8Encoding]::new($false))
-          # onedir keeps the launcher EXE small and places runtime files in _internal.
-          # UPX is intentionally disabled to avoid decompression overhead at startup.
-          python -m PyInstaller --noconfirm --clean --onedir --contents-directory "_internal" --noupx --windowed --name $appExe --icon "$((Resolve-Path easy_save_audio.ico).Path)" --add-data "easy_save_audio.png;." --add-data "easy_save_audio.ico;." --add-binary "$ffmpeg;." --add-binary "$ffprobe;." --collect-all yt_dlp --collect-all tkinterdnd2 app_v2.py
-          if ($LASTEXITCODE -ne 0) { throw "PyInstaller onedir build failed." }
-          $appDir = "dist/$appExe"
-          Copy-Item "Easy_Save_Audio_Video_기능설명서_v2.3.6.md" -Destination $appDir
-          $exePath = "$appDir/$appExe.exe"
-          $internalDir = "$appDir/_internal"
-          if (-not (Test-Path $exePath)) { throw "Application executable was not created: $exePath" }
-          if (-not (Test-Path $internalDir)) { throw "_internal directory was not created." }
+          $profiles = @(
+            "J_LAME_BASELINE", "K_RESERVOIR_ON", "L_NO_XING", "M_NO_ID3",
+            "N_CBR_192K", "O_CBR_128K", "P_MONO_320K", "Q_MONO_192K",
+            "R_VBR_Q2", "S_48KHZ"
+          )
+          $package = "dist/EasySaveAudioVideo_v$version-Winamp10"
+          New-Item -ItemType Directory -Force -Path $package | Out-Null
+          $sharedRuntimeCopied = $false
+          foreach ($profile in $profiles) {
+            Write-Host "===== Building profile $profile ====="
+            $sourceText = $baseSource.Replace('MP3_TEST_PROFILE = "BASELINE"', "MP3_TEST_PROFILE = `"$profile`"")
+            if ($sourceText -eq $baseSource) { throw "Could not set MP3_TEST_PROFILE for $profile" }
+            [System.IO.File]::WriteAllText((Join-Path (Get-Location) "app_v2.py"), $sourceText, [System.Text.UTF8Encoding]::new($false))
+            $appExe = "EasySaveAudioVideo_v$version-$($profile.Substring(0,1))"
+            $distPath = "build/profile-dist/$profile"
+            $workPath = "build/profile-work/$profile"
+            python -m PyInstaller --noconfirm --clean --onedir --contents-directory "_internal" --noupx --windowed --name $appExe --distpath $distPath --workpath $workPath --specpath "build/spec" --icon "$((Resolve-Path easy_save_audio.ico).Path)" --add-data "easy_save_audio.png;." --add-data "easy_save_audio.ico;." --add-binary "$ffmpeg;." --add-binary "$ffprobe;." --collect-all yt_dlp --collect-all tkinterdnd2 app_v2.py
+            if ($LASTEXITCODE -ne 0) { throw "PyInstaller failed for profile $profile" }
+            $builtDir = Join-Path $distPath $appExe
+            $builtExe = Join-Path $builtDir "$appExe.exe"
+            if (-not (Test-Path $builtExe)) { throw "Missing executable for $profile" }
+            Copy-Item $builtExe (Join-Path $package "EasySave_$($profile.Substring(0,1)).exe") -Force
+            if (-not $sharedRuntimeCopied) {
+              Copy-Item (Join-Path $builtDir "_internal") (Join-Path $package "_internal") -Recurse
+              $sharedRuntimeCopied = $true
+            }
+          }
+          Copy-Item "Easy_Save_Audio_Video_기능설명서_v2.3.6.md" -Destination $package
+          $exeFiles = Get-ChildItem $package -Filter "EasySave_*.exe"
+          if ($exeFiles.Count -ne 10) { throw "Expected 10 EXE files, found $($exeFiles.Count)" }
+          if (-not (Test-Path (Join-Path $package "_internal"))) { throw "Shared _internal runtime folder is missing." }
           Add-Type -AssemblyName System.Drawing
-          $associatedIcon = [System.Drawing.Icon]::ExtractAssociatedIcon((Resolve-Path $exePath).Path)
-          if ($null -eq $associatedIcon) { throw "The built EXE has no readable associated icon resource." }
-          $associatedIcon.Dispose()
-          # Smoke-test the frozen GUI executable before publishing the artifact.
-          $process = Start-Process -FilePath (Resolve-Path $exePath).Path -PassThru
+          foreach ($exe in $exeFiles) {
+            $associatedIcon = [System.Drawing.Icon]::ExtractAssociatedIcon($exe.FullName)
+            if ($null -eq $associatedIcon) { throw "Missing icon in $($exe.Name)" }
+            $associatedIcon.Dispose()
+          }
+          $smoke = Start-Process -FilePath (Join-Path $package "EasySave_J.exe") -PassThru
           Start-Sleep -Seconds 8
-          $process.Refresh()
-          if ($process.HasExited) { throw "Application exited during the Windows startup smoke test (exit code $($process.ExitCode))." }
-          Stop-Process -Id $process.Id -Force
-          Write-Host "Windows startup smoke test passed."
-          Write-Host "Launcher size: $((Get-Item $exePath).Length) bytes"
-      - name: Upload Windows onedir application folder
+          $smoke.Refresh()
+          if ($smoke.HasExited) { throw "J executable exited during startup smoke test ($($smoke.ExitCode))." }
+          Stop-Process -Id $smoke.Id -Force
+          Write-Host "Ten executables and shared runtime folder verified."
+      - name: Upload single shared application folder
         uses: actions/upload-artifact@v4
         with:
-          name: Easy-Save-Audio-Video-v${{ steps.build.outputs.version }}-${{ matrix.profile }}-Windows-x64-Onedir
-          path: dist/EasySaveAudioVideo_v${{ steps.build.outputs.version }}-${{ matrix.profile }}/
+          name: Easy-Save-Audio-Video-v2.3.6-Winamp10-Windows-x64
+          path: dist/EasySaveAudioVideo_v2.3.6-Winamp10/
           if-no-files-found: error
