@@ -1,5 +1,5 @@
 name: Build Easy Save Audio & Video (Windows x64)
-# v2.2.7 tests standard stereo MP3 encoding for Winamp compatibility; diagnostic logs reset on startup.
+# v2.2.8 tests standard stereo MP3 encoding for Winamp compatibility; diagnostic logs reset on startup.
 on:
   push:
     branches: [ main ]
@@ -30,7 +30,7 @@ jobs:
           $versionMatch = Select-String -Path app_v2.py -Pattern '^APP_VERSION = "([^"]+)"'
           if (-not $versionMatch) { throw "APP_VERSION was not found in app_v2.py" }
           $version = $versionMatch.Matches[0].Groups[1].Value
-          if ($version -ne "2.2.7") { throw "Expected version 2.2.7, found $version" }
+          if ($version -ne "2.2.8") { throw "Expected version 2.2.8, found $version" }
           "version=$version" >> $env:GITHUB_OUTPUT
           $ffmpeg = python -c "import imageio_ffmpeg; print(imageio_ffmpeg.get_ffmpeg_exe())"
           # imageio-ffmpeg bundles ffmpeg.exe only. Download ffprobe.exe separately.
@@ -47,7 +47,7 @@ jobs:
           python -m PyInstaller --noconfirm --clean --onedir --contents-directory "_internal" --noupx --windowed --name $appExe --icon easy_save_audio.ico --add-data "easy_save_audio.png;." --add-data "easy_save_audio.ico;." --add-binary "$ffmpeg;." --add-binary "$ffprobe;." --collect-all yt_dlp --collect-all tkinterdnd2 app_v2.py
           if ($LASTEXITCODE -ne 0) { throw "PyInstaller onedir build failed." }
           $appDir = "dist/$appExe"
-          Copy-Item "Easy_Save_Audio_Video_기능설명서_v2.2.7.md" -Destination $appDir
+          Copy-Item "Easy_Save_Audio_Video_기능설명서_v2.2.8.md" -Destination $appDir
           $exePath = "$appDir/$appExe.exe"
           $internalDir = "$appDir/_internal"
           if (-not (Test-Path $exePath)) { throw "Application executable was not created: $exePath" }
@@ -63,7 +63,7 @@ jobs:
             # so verify required files by their path suffix rather than one fixed prefix.
             $hasExe = @($entries | Where-Object { $_.FullName -match ("(^|/)" + [regex]::Escape("$appExe.exe") + "$") }).Count -eq 1
             $hasInternal = @($entries | Where-Object { $_.FullName -match "(^|/)_internal/" }).Count -gt 0
-            $hasManual = @($entries | Where-Object { $_.FullName -match ("(^|/)" + [regex]::Escape("Easy_Save_Audio_Video_기능설명서_v2.2.7.md") + "$") }).Count -eq 1
+            $hasManual = @($entries | Where-Object { $_.FullName -match ("(^|/)" + [regex]::Escape("Easy_Save_Audio_Video_기능설명서_v2.2.8.md") + "$") }).Count -eq 1
             if (-not $hasExe -or -not $hasInternal -or -not $hasManual) {
               Write-Host "ZIP entry paths (first 60):"
               $entries | Select-Object -First 60 | ForEach-Object { Write-Host $_.FullName }
