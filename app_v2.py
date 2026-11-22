@@ -1135,7 +1135,7 @@ class EasySaveApp:
             decode_filter_options = ["-af", "loudnorm=I=-14:TP=-1.0:LRA=11"] if cfg["loudnorm"] else []
             decode_command = [
                 self.ffmpeg, "-y", "-hide_banner", "-loglevel", "error",
-                "-i", str(source), "-map", "0:a:0", "-vn",
+                "-i", str(source), "-map", "0:a:0", "-vn", "-map_metadata", "-1",
                 *decode_filter_options,
                 "-c:a", "pcm_s16le", "-ar", str(pcm_sample_rate), "-ac", str(output_channels),
                 "-f", "wav", str(pcm_path)
