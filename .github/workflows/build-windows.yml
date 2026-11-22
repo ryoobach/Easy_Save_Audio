@@ -29,15 +29,24 @@ jobs:
           $versionMatch = Select-String -Path app_v2.py -Pattern '^APP_VERSION = "([^"]+)"'
           if (-not $versionMatch) { throw "APP_VERSION was not found in app_v2.py" }
           $version = $versionMatch.Matches[0].Groups[1].Value
-          if ($version -ne "2.2.1") { throw "Expected version 2.2.1, found $version" }
+          if ($version -ne "2.2.2") { throw "Expected version 2.2.2, found $version" }
           "version=$version" >> $env:GITHUB_OUTPUT
           $ffmpeg = python -c "import imageio_ffmpeg; print(imageio_ffmpeg.get_ffmpeg_exe())"
+          # imageio-ffmpeg bundles ffmpeg.exe only. Download ffprobe.exe separately.
+          $ffprobeZip = Join-Path $env:RUNNER_TEMP "ffmpeg-essentials.zip"
+          $ffprobeExtract = Join-Path $env:RUNNER_TEMP "ffmpeg-essentials"
+          Invoke-WebRequest -Uri "https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-essentials.zip" -OutFile $ffprobeZip
+          Expand-Archive -Path $ffprobeZip -DestinationPath $ffprobeExtract -Force
+          $ffprobeItem = Get-ChildItem -Path $ffprobeExtract -Filter "ffprobe.exe" -Recurse | Select-Object -First 1
+          if (-not $ffprobeItem) { throw "ffprobe.exe was not found in the downloaded package." }
+          $ffprobe = $ffprobeItem.FullName
           $appExe = "EasySaveAudioVideo_v$version"
           # onedir keeps the launcher EXE small and places runtime files in _internal.
           # UPX is intentionally disabled to avoid decompression overhead at startup.
-          python -m PyInstaller --noconfirm --clean --onedir --contents-directory "_internal" --noupx --windowed --name $appExe --icon easy_save_audio.ico --add-data "easy_save_audio.png;." --add-data "easy_save_audio.ico;." --add-binary "$ffmpeg;." --collect-all yt_dlp --collect-all tkinterdnd2 app_v2.py
+          python -m PyInstaller --noconfirm --clean --onedir --contents-directory "_internal" --noupx --windowed --name $appExe --icon easy_save_audio.ico --add-data "easy_save_audio.png;." --add-data "easy_save_audio.ico;." --add-binary "$ffmpeg;." --add-binary "$ffprobe;." --collect-all yt_dlp --collect-all tkinterdnd2 app_v2.py
           if ($LASTEXITCODE -ne 0) { throw "PyInstaller onedir build failed." }
           $appDir = "dist/$appExe"
+          Copy-Item "Easy_Save_Audio_Video_기능설명서_v2.2.2.md" -Destination $appDir
           $exePath = "$appDir/$appExe.exe"
           $internalDir = "$appDir/_internal"
           if (-not (Test-Path $exePath)) { throw "Application executable was not created: $exePath" }
@@ -51,8 +60,9 @@ jobs:
             $entries = @($archive.Entries | Where-Object { -not $_.FullName.EndsWith("/") })
             $hasExe = @($entries | Where-Object { $_.FullName -eq "$appExe/$appExe.exe" }).Count -eq 1
             $hasInternal = @($entries | Where-Object { $_.FullName -like "$appExe/_internal/*" }).Count -gt 0
-            if (-not $hasExe -or -not $hasInternal) {
-              throw "Onedir ZIP verification failed: launcher or _internal files are missing."
+            $hasManual = @($entries | Where-Object { $_.FullName -eq "$appExe/Easy_Save_Audio_Video_기능설명서_v2.2.2.md" }).Count -eq 1
+            if (-not $hasExe -or -not $hasInternal -or -not $hasManual) {
+              throw "Onedir ZIP verification failed: launcher, _internal files, or feature manual are missing."
             }
           } finally {
             $archive.Dispose()

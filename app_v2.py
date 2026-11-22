@@ -24,7 +24,7 @@ except ImportError:
     TkinterDnD = None
 
 APP_NAME = "Easy Save Audio & Video"
-APP_VERSION = "2.2.1"
+APP_VERSION = "2.2.2"
 APPDATA = Path(os.environ.get("APPDATA", str(Path.home()))) / "EasySaveAudio"
 APPDATA.mkdir(parents=True, exist_ok=True)
 SETTINGS_FILE = APPDATA / "settings.json"
@@ -72,6 +72,23 @@ def ffmpeg_path():
     import imageio_ffmpeg
     return imageio_ffmpeg.get_ffmpeg_exe()
 
+
+def ffprobe_path(ffmpeg=None):
+    candidates = []
+    if getattr(sys, "frozen", False):
+        base = Path(getattr(sys, "_MEIPASS", Path(sys.executable).parent))
+        candidates.extend(base.glob("ffprobe*.exe"))
+    if ffmpeg:
+        candidates.append(Path(ffmpeg).with_name("ffprobe.exe"))
+    from shutil import which
+    found = which("ffprobe")
+    if found:
+        candidates.append(Path(found))
+    for candidate in candidates:
+        if candidate.is_file():
+            return str(candidate)
+    return None
+
 def is_url(value):
     parsed = urllib.parse.urlparse(value)
     return parsed.scheme in ("http", "https") and bool(parsed.netloc)
@@ -96,6 +113,7 @@ class EasySaveApp:
         self.job_counter = 0
         self.executor = ThreadPoolExecutor(max_workers=2, thread_name_prefix="media-job")
         self.ffmpeg = ffmpeg_path()
+        self.ffprobe = ffprobe_path(self.ffmpeg)
         self.closing = False
         self.dnd_error = None
         self.build_ui()
@@ -206,46 +224,92 @@ class EasySaveApp:
         self.log_event("manual_mp3_diagnostic_started", source=path)
         self.executor.submit(self._diagnose_mp3_file, Path(path))
 
-    def _diagnose_mp3_file(self, path):
+    def _probe_mp3_file(self, path):
+        if not self.ffprobe:
+            raise RuntimeError("ffprobe.exe를 찾을 수 없습니다. 앱 패키지에 진단 도구가 포함되어 있는지 확인해 주세요.")
+        command = [
+            self.ffprobe, "-v", "error", "-select_streams", "a:0",
+            "-show_entries", "stream=codec_name,sample_rate,channels,channel_layout:format=duration",
+            "-of", "json", str(path)
+        ]
+        probe = subprocess.run(
+            command, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+            text=True, encoding="utf-8", errors="replace", timeout=60,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0)
+        )
+        if probe.returncode != 0:
+            raise RuntimeError(probe.stderr[-2000:] or f"ffprobe 종료 코드: {probe.returncode}")
+        data = json.loads(probe.stdout or "{}")
+        streams = data.get("streams") or []
+        if not streams:
+            raise RuntimeError("오디오 스트림을 찾을 수 없습니다.")
+        stream = streams[0]
+        fmt = data.get("format") or {}
+        return {
+            "codec": str(stream.get("codec_name") or "unknown").lower(),
+            "sample_rate": int(stream.get("sample_rate") or 0),
+            "channels": int(stream.get("channels") or 0),
+            "channel_layout": str(stream.get("channel_layout") or "unknown").lower(),
+            "duration": str(fmt.get("duration") or "unknown")
+        }
+
+    def _decode_mp3_file(self, path):
+        command = [
+            self.ffmpeg, "-hide_banner", "-v", "error", "-xerror", "-err_detect", "explode",
+            "-i", str(path), "-map", "0:a:0", "-f", "null", os.devnull
+        ]
+        decoded = subprocess.run(
+            command, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+            text=True, encoding="utf-8", errors="replace", timeout=900,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0)
+        )
+        return decoded.returncode, (decoded.stderr or "")[-2500:]
+
+    def _measure_mp3_volume(self, path):
+        command = [
+            self.ffmpeg, "-hide_banner", "-i", str(path), "-map", "0:a:0",
+            "-af", "volumedetect", "-f", "null", os.devnull
+        ]
+        measured = subprocess.run(
+            command, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+            text=True, encoding="utf-8", errors="replace", timeout=900,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0)
+        )
+        match = re.search(r"mean_volume:\\s*(-?inf|[-+]?\\d+(?:\\.\\d+)?)\\s*dB", measured.stderr or "", re.I)
+        return match.group(1) if match else "unknown"
+
+    def _inspect_mp3_file(self, path):
         result = {
             "path": str(path), "size": path.stat().st_size if path.exists() else 0,
-            "codec": "unknown", "sample_rate": 0, "channels": "unknown",
-            "mean_volume": "unknown", "decode_returncode": -1, "error": ""
+            "codec": "unknown", "sample_rate": 0, "channels": 0,
+            "channel_layout": "unknown", "duration": "unknown",
+            "mean_volume": "unknown", "decode_returncode": -1,
+            "probe_error": "", "decode_error": ""
         }
         try:
-            command = [
-                self.ffmpeg, "-hide_banner", "-xerror", "-err_detect", "explode",
-                "-i", str(path), "-map", "0:a:0", "-af", "volumedetect",
-                "-f", "null", os.devnull
-            ]
-            check = subprocess.run(
-                command, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                text=True, encoding="utf-8", errors="replace", timeout=900,
-                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0)
-            )
-            output = check.stderr or ""
-            # FFmpeg also prints the decoded null-output stream (pcm_s16le).
-            # Read the codec and stream properties only from the input MP3 section.
-            input_match = re.search(r"Input #0.*?(?=\nOutput #0|\Z)", output, re.I | re.S)
-            input_info = input_match.group(0) if input_match else output
-            stream = re.search(r"Audio:\s*([^,\s]+),\s*(\d+)\s*Hz,\s*([^\r\n,]+)", input_info, re.I)
-            volume = re.search(r"mean_volume:\s*(-?inf|[-+]?\d+(?:\.\d+)?)\s*dB", output)
-            if stream:
-                result["codec"] = stream.group(1).lower()
-                result["sample_rate"] = int(stream.group(2))
-                result["channels"] = stream.group(3).split(",")[0].strip().lower()
-            if volume:
-                result["mean_volume"] = volume.group(1)
-            result["decode_returncode"] = check.returncode
-            result["error"] = output[-2500:] if check.returncode else ""
-            result["passed"] = (
-                check.returncode == 0 and result["codec"] == "mp3"
-                and result["sample_rate"] == 44100 and result["channels"] == "stereo"
-                and result["mean_volume"] not in ("unknown", "inf", "-inf")
-            )
+            result.update(self._probe_mp3_file(path))
         except Exception as exc:
-            result["error"] = str(exc)
-            result["passed"] = False
+            result["probe_error"] = str(exc)
+        try:
+            result["decode_returncode"], result["decode_error"] = self._decode_mp3_file(path)
+        except Exception as exc:
+            result["decode_error"] = str(exc)
+        try:
+            result["mean_volume"] = self._measure_mp3_volume(path)
+        except Exception as exc:
+            self.log_event("mp3_volume_measurement_warning", path=path.name, error=str(exc))
+        result["passed"] = (
+            not result["probe_error"] and result["codec"] == "mp3"
+            and result["sample_rate"] == 44100 and result["channels"] == 2
+            and result["decode_returncode"] == 0
+        )
+        result["error"] = "\\n".join(
+            part for part in (result["probe_error"], result["decode_error"]) if part
+        )
+        return result
+
+    def _diagnose_mp3_file(self, path):
+        result = self._inspect_mp3_file(path)
         self.log_event("manual_mp3_diagnostic_completed", **result)
         self.root.after(0, lambda data=result: self._show_mp3_diagnostic_result(data))
 
@@ -745,53 +809,41 @@ class EasySaveApp:
                 raise RuntimeError("사용자가 작업을 취소했습니다.")
         error = process.stderr.read().decode("utf-8", errors="replace") if process.stderr else ""
         if process.returncode != 0 or not target.exists() or target.stat().st_size < 1024:
-            self.log_event("mp3_validation_failed", job_id=job_id, returncode=process.returncode,
+            self.log_event("mp3_encode_failed", job_id=job_id, returncode=process.returncode,
                            exists=target.exists(), size=target.stat().st_size if target.exists() else 0,
                            ffmpeg_error=error[-3000:])
-            raise RuntimeError(error or "MP3 변환 결과가 비정상입니다.")
-        # Strictly decode the entire output and verify its stream properties before
-        # marking the job successful. Winamp compatibility requires a conventional
-        # MPEG Layer III stream, 44.1 kHz stereo, and actual decoded audio samples.
-        verify_cmd = [self.ffmpeg, "-hide_banner", "-xerror", "-err_detect", "explode",
-                      "-i", str(target), "-map", "0:a:0", "-af", "volumedetect",
-                      "-f", "null", os.devnull]
-        verify = subprocess.run(verify_cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                                text=True, encoding="utf-8", errors="replace",
-                                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
-        verify_text = verify.stderr or ""
-        # Separate the source MP3 stream from FFmpeg's decoded PCM output stream.
-        # pcm_s16le is expected for the null output and is not the MP3 file codec.
-        input_match = re.search(r"Input #0.*?(?=\nOutput #0|\Z)", verify_text, re.I | re.S)
-        input_info = input_match.group(0) if input_match else verify_text
-        mean_match = re.search(r"mean_volume:\s*(-?inf|[-+]?\d+(?:\.\d+)?)\s*dB", verify_text)
-        duration_match = re.search(r"Duration:\s*(\d{2}:\d{2}:\d{2}(?:\.\d+)?)", input_info)
-        stream_match = re.search(r"Audio:\s*([^,\s]+),\s*(\d+)\s*Hz,\s*([^,\r\n]+)", input_info, re.I)
-        mean_volume = mean_match.group(1) if mean_match else "unknown"
-        duration = duration_match.group(1) if duration_match else "unknown"
-        codec = stream_match.group(1).lower() if stream_match else "unknown"
-        sample_rate = int(stream_match.group(2)) if stream_match else 0
-        channel_layout = stream_match.group(3).split(",")[0].strip().lower() if stream_match else "unknown"
+            raise RuntimeError(error or "MP3 변환 결과 파일을 만들지 못했습니다.")
+
+        # 인코딩 성공과 사후 진단을 분리합니다. 진단 도구나 메타데이터
+        # 판독에 문제가 있어도 정상 생성된 사용자 파일은 보존하고 변환을 완료 처리합니다.
+        inspection = self._inspect_mp3_file(target)
         validation_reasons = []
-        if verify.returncode != 0: validation_reasons.append("full_decode_failed")
-        if codec != "mp3": validation_reasons.append("input_codec_not_mp3")
-        if sample_rate != 44100: validation_reasons.append("sample_rate_not_44100")
-        if channel_layout != "stereo": validation_reasons.append("channel_layout_not_stereo")
-        self.log_event("mp3_validation", job_id=job_id, size=target.stat().st_size,
-                       duration=duration, codec=codec, sample_rate=sample_rate,
-                       channel_layout=channel_layout, mean_volume=mean_volume,
-                       decode_returncode=verify.returncode,
-                       validation_reasons=validation_reasons,
-                       ffmpeg_diagnostic=verify_text[-2500:])
-        # Preserve the output file; validation errors must never delete user data.
+        if inspection["probe_error"]:
+            validation_reasons.append("ffprobe_unavailable_or_failed")
+        if inspection["codec"] != "mp3":
+            validation_reasons.append("input_codec_not_mp3")
+        if inspection["sample_rate"] != 44100:
+            validation_reasons.append("sample_rate_not_44100")
+        if inspection["channels"] != 2:
+            validation_reasons.append("channel_count_not_stereo")
+        if inspection["decode_returncode"] != 0:
+            validation_reasons.append("full_decode_failed")
+        fields = {
+            "job_id": job_id, "size": inspection["size"],
+            "duration": inspection["duration"], "codec": inspection["codec"],
+            "sample_rate": inspection["sample_rate"], "channels": inspection["channels"],
+            "channel_layout": inspection["channel_layout"], "mean_volume": inspection["mean_volume"],
+            "decode_returncode": inspection["decode_returncode"],
+            "validation_reasons": validation_reasons,
+            "probe_error": inspection["probe_error"], "decode_error": inspection["decode_error"]
+        }
+        self.log_event("mp3_validation", **fields)
         if validation_reasons:
-            raise RuntimeError(
-                "MP3 파일 검증에서 실제 형식 또는 디코딩 문제를 발견했습니다. "
-                "생성된 파일은 보존했습니다. 진단 로그를 확인해 주세요."
-            )
+            self.log_event("mp3_diagnostic_warning_output_preserved", **fields)
         self.log_event("ffmpeg_encode_completed", job_id=job_id, output_file=target,
-                       size=target.stat().st_size, duration=duration, codec=codec,
-                       sample_rate=sample_rate, channel_layout=channel_layout,
-                       mean_volume=mean_volume)
+                       size=inspection["size"], duration=inspection["duration"],
+                       codec=inspection["codec"], sample_rate=inspection["sample_rate"],
+                       channels=inspection["channels"], mean_volume=inspection["mean_volume"])
 
     def process_local(self, job_id, source, outputs, cancel):
         if cancel.is_set():
