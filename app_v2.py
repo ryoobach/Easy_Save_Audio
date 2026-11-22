@@ -25,7 +25,7 @@ except ImportError:
     TkinterDnD = None
 
 APP_NAME = "Easy Save Audio & Video"
-APP_VERSION = "2.3.5"
+APP_VERSION = "2.3.6"
 MP3_TEST_PROFILE = "BASELINE"
 APPDATA = Path(os.environ.get("APPDATA", str(Path.home()))) / "EasySaveAudio"
 APPDATA.mkdir(parents=True, exist_ok=True)
@@ -282,6 +282,7 @@ class EasySaveApp:
             "gap_bytes": 0, "truncated_frame": False,
             "trailing_bytes": 0, "bitrate_kbps": {},
             "sample_rates": {}, "mpeg_versions": {},
+            "channel_modes": {},
             "main_data_begin_nonzero_frames": 0,
             "main_data_begin_min": None, "main_data_begin_max": None,
             "main_data_begin_first_values": [], "side_info_parse_errors": 0
@@ -380,6 +381,8 @@ class EasySaveApp:
                 result["audio_bytes_scanned"] += frame_length
                 result["bitrate_kbps"][str(bitrate)] = result["bitrate_kbps"].get(str(bitrate), 0) + 1
                 result["sample_rates"][str(sample_rate)] = result["sample_rates"].get(str(sample_rate), 0) + 1
+                channel_mode_name = {0: "stereo", 1: "joint_stereo", 2: "dual_channel", 3: "mono"}[channel_mode]
+                result["channel_modes"][channel_mode_name] = result["channel_modes"].get(channel_mode_name, 0) + 1
                 version_name = {3: "MPEG1", 2: "MPEG2", 0: "MPEG2.5"}[version]
                 result["mpeg_versions"][version_name] = result["mpeg_versions"].get(version_name, 0) + 1
                 offset += frame_length
@@ -568,7 +571,7 @@ class EasySaveApp:
             result["channel_analysis"] = f"analysis_failed: {exc}"
         result["passed"] = (
             not result["probe_error"] and result["codec"] == "mp3"
-            and result["sample_rate"] == 44100 and result["channels"] == 2
+            and result["sample_rate"] in (44100, 48000) and result["channels"] == 2
             and result["decode_returncode"] == 0
         )
         result["error"] = "\n".join(
@@ -1063,6 +1066,9 @@ class EasySaveApp:
         if target.exists():
             target = target.with_name(target.stem + "_" + datetime.now().strftime("%H%M%S") + target.suffix)
 
+        selected_profile = MP3_TEST_PROFILE
+        pcm_sample_rate = 48000 if selected_profile == "G_48KHZ" else 44100
+
         # Inspect the original audio stream, then normalize every source codec through PCM WAV.
         try:
             source_audio = self._probe_mp3_file(source)
@@ -1101,13 +1107,13 @@ class EasySaveApp:
             decode_command = [
                 self.ffmpeg, "-y", "-hide_banner", "-loglevel", "error",
                 "-i", str(source), "-map", "0:a:0", "-vn",
-                "-c:a", "pcm_s16le", "-ar", "44100", "-ac", "2",
+                "-c:a", "pcm_s16le", "-ar", str(pcm_sample_rate), "-ac", "2",
                 "-f", "wav", str(pcm_path)
             ]
             self.log_event(
                 "source_audio_pcm_decode_started", job_id=job_id,
                 source_file=source, source_audio_codec=source_audio.get("codec", "unknown"),
-                intermediate_format="pcm_s16le_wav", sample_rate=44100, channels=2
+                intermediate_format="pcm_s16le_wav", sample_rate=pcm_sample_rate, channels=2
             )
             self.emit(job_id, "원본 오디오 디코딩 중", None, None)
             process = subprocess.Popen(
@@ -1136,44 +1142,39 @@ class EasySaveApp:
 
             if cancel.is_set():
                 raise RuntimeError("사용자가 작업을 취소했습니다.")
-            # Four isolated v2.3.5 builds test one compatibility variable at a time.
-            # A_NO_XING: remove the CBR Info/Xing seek header.
-            # B_NO_ID3: remove the ID3v2 tag while retaining the Info header.
-            # C_RESERVOIR_ON: restore the Layer III bit reservoir.
-            # D_JOINT_STEREO: explicitly request joint stereo.
-            profile_options = {
-                "A_NO_XING": ["-write_xing", "0"],
-                "B_NO_ID3": ["-id3v2_version", "0"],
-                "C_RESERVOIR_ON": ["-reservoir", "1"],
-                "D_JOINT_STEREO": ["-joint_stereo", "1"],
-            }
+            # v2.3.6 isolates four remaining compatibility variables after A-D failed.
+            # E: lower CBR bitrate; F: use LAME VBR quality 2; G: encode at 48 kHz;
+            # H: bypass loudnorm while retaining the same PCM source and MP3 settings.
             encode_options = [
-                "-reservoir", "0", "-b:a", "320k", "-ar", "44100", "-ac", "2",
+                "-reservoir", "0", "-b:a", "320k", "-ar", str(pcm_sample_rate), "-ac", "2",
                 "-write_xing", "1", "-id3v2_version", "3"
             ]
-            selected_profile = MP3_TEST_PROFILE
-            overrides = profile_options.get(selected_profile, [])
-            for option_index in range(0, len(overrides), 2):
-                option_name, option_value = overrides[option_index:option_index + 2]
-                if option_name in encode_options:
-                    option_position = encode_options.index(option_name)
-                    encode_options[option_position + 1] = option_value
-                else:
-                    encode_options.extend([option_name, option_value])
+            bitrate_label = "320k CBR"
+            if selected_profile == "E_CBR_192K":
+                encode_options[encode_options.index("-b:a") + 1] = "192k"
+                bitrate_label = "192k CBR"
+            elif selected_profile == "F_VBR_Q2":
+                bitrate_index = encode_options.index("-b:a")
+                del encode_options[bitrate_index:bitrate_index + 2]
+                encode_options.extend(["-q:a", "2"])
+                bitrate_label = "VBR quality 2"
+            audio_filter_options = (
+                [] if selected_profile == "H_NO_LOUDNORM"
+                else ["-af", "loudnorm=I=-14:TP=-1.0:LRA=11"]
+            )
             encode_command = [
                 self.ffmpeg, "-y", "-hide_banner", "-loglevel", "error",
                 "-i", str(pcm_path), "-map", "0:a:0", "-vn", "-map_metadata", "-1",
-                "-af", "loudnorm=I=-14:TP=-1.0:LRA=11", "-codec:a", "libmp3lame",
+                *audio_filter_options, "-codec:a", "libmp3lame",
                 *encode_options, "-f", "mp3", str(target)
             ]
             self.log_event(
                 "ffmpeg_encode_started", job_id=job_id, input_file=source,
-                intermediate_file=pcm_path, output_file=target, bitrate="320k",
-                compatibility_profile=f"v2.3.5_{selected_profile}",
-                joint_stereo=("forced" if selected_profile == "D_JOINT_STEREO" else "libmp3lame_default"),
-                bit_reservoir=("enabled" if selected_profile == "C_RESERVOIR_ON" else "disabled"),
-                xing_header=("disabled" if selected_profile == "A_NO_XING" else "enabled"),
-                id3v2=("disabled" if selected_profile == "B_NO_ID3" else "3"),
+                intermediate_file=pcm_path, output_file=target, bitrate=bitrate_label,
+                compatibility_profile=f"v2.3.6_{selected_profile}",
+                output_sample_rate=pcm_sample_rate, output_channels=2,
+                loudnorm=("disabled" if selected_profile == "H_NO_LOUDNORM" else "enabled"),
+                mp3_rate_control=("VBR quality 2" if selected_profile == "F_VBR_Q2" else "CBR"),
                 source_audio_codec=source_audio.get("codec", "unknown")
             )
             self.emit(job_id, "MP3 인코딩 중", None, None)
@@ -1205,8 +1206,8 @@ class EasySaveApp:
                 validation_reasons.append("ffprobe_unavailable_or_failed")
             if inspection["codec"] != "mp3":
                 validation_reasons.append("input_codec_not_mp3")
-            if inspection["sample_rate"] != 44100:
-                validation_reasons.append("sample_rate_not_44100")
+            if inspection["sample_rate"] != pcm_sample_rate:
+                validation_reasons.append(f"sample_rate_not_{pcm_sample_rate}")
             if inspection["channels"] != 2:
                 validation_reasons.append("channel_count_not_stereo")
             if inspection["decode_returncode"] != 0:
