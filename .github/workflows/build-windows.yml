@@ -18,6 +18,8 @@ jobs:
         with:
           python-version: '3.12'
           architecture: x64
+          cache: pip
+          cache-dependency-path: requirements.txt
       - name: Install dependencies
         run: python -m pip install -r requirements.txt
       - name: Create application icon
@@ -28,7 +30,7 @@ jobs:
           $versionMatch = Select-String -Path app_v2.py -Pattern '^APP_VERSION = "([^"]+)"'
           if (-not $versionMatch) { throw "APP_VERSION was not found in app_v2.py" }
           $version = $versionMatch.Matches[0].Groups[1].Value
-          if ($version -ne "2.3.8") { throw "Expected version 2.3.7, found $version" }
+          if ($version -ne "2.3.8") { throw "Expected version 2.3.8, found $version" }
           $baseSource = Get-Content app_v2.py -Raw
           $ffmpeg = python -c "import imageio_ffmpeg; print(imageio_ffmpeg.get_ffmpeg_exe())"
           $lameZip = Join-Path $env:RUNNER_TEMP "lame-4.0-win64.zip"
@@ -63,7 +65,7 @@ jobs:
             $appExe = "EasySaveAudioVideo_v$version-$($profile.Substring(0,1))"
             $distPath = "build/profile-dist/$profile"
             $workPath = "build/profile-work/$profile"
-            python -m PyInstaller --noconfirm --clean --onedir --contents-directory "_internal" --noupx --windowed --name $appExe --distpath $distPath --workpath $workPath --specpath "build/spec" --icon "$((Resolve-Path easy_save_audio.ico).Path)" --add-data "$((Resolve-Path easy_save_audio.png).Path);." --add-data "$((Resolve-Path easy_save_audio.ico).Path);." --add-binary "$ffmpeg;." --add-binary "$ffprobe;." --add-binary "$lame;." --collect-all yt_dlp --collect-all tkinterdnd2 app_v2.py
+            python -m PyInstaller --noconfirm --onedir --contents-directory "_internal" --noupx --windowed --name $appExe --distpath $distPath --workpath $workPath --specpath "build/spec" --icon "$((Resolve-Path easy_save_audio.ico).Path)" --add-data "$((Resolve-Path easy_save_audio.png).Path);." --add-data "$((Resolve-Path easy_save_audio.ico).Path);." --add-binary "$ffmpeg;." --add-binary "$ffprobe;." --add-binary "$lame;." --collect-all yt_dlp --collect-all tkinterdnd2 app_v2.py
             if ($LASTEXITCODE -ne 0) { throw "PyInstaller failed for profile $profile" }
             $builtDir = Join-Path $distPath $appExe
             $builtExe = Join-Path $builtDir "$appExe.exe"
@@ -94,5 +96,5 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: Easy-Save-Audio-Video-v2.3.8-Winamp10-LAME-Windows-x64
-          path: dist/EasySaveAudioVideo_v2.3.7-Winamp10-LAME/
+          path: dist/EasySaveAudioVideo_v2.3.8-Winamp10-LAME/
           if-no-files-found: error
