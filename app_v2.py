@@ -25,7 +25,7 @@ except ImportError:
     TkinterDnD = None
 
 APP_NAME = "Easy Save Audio & Video"
-APP_VERSION = "2.2.8"
+APP_VERSION = "2.2.9"
 APPDATA = Path(os.environ.get("APPDATA", str(Path.home()))) / "EasySaveAudio"
 APPDATA.mkdir(parents=True, exist_ok=True)
 SETTINGS_FILE = APPDATA / "settings.json"
@@ -272,6 +272,91 @@ class EasySaveApp:
             "duration": str(fmt.get("duration") or "unknown")
         }
 
+    def _inspect_mp3_frame_header(self, path):
+        """Inspect opening MP3 bytes for MPEG frame and Xing/Info header details."""
+        result = {
+            "file_size": 0, "id3_present": False, "id3_version": "none",
+            "id3_tag_size": 0, "audio_start_offset": 0, "mpeg_sync_offset": -1,
+            "mpeg_version": "unknown", "mpeg_layer": "unknown",
+            "bitrate_kbps": 0, "sample_rate": 0, "channel_mode": "unknown",
+            "crc_protected": False, "xing_info_offset": -1,
+            "xing_info_marker": "not_checked", "xing_flags": None,
+            "xing_frame_count": None, "xing_byte_count": None,
+            "vbri_marker": "not_checked", "opening_bytes_hex": ""
+        }
+        try:
+            result["file_size"] = path.stat().st_size
+            with path.open("rb") as handle:
+                data = handle.read(65536)
+            result["opening_bytes_hex"] = data[:32].hex()
+            offset = 0
+            if data[:3] == b"ID3" and len(data) >= 10:
+                result["id3_present"] = True
+                result["id3_version"] = f"2.{data[3]}.{data[4]}"
+                size_bytes = data[6:10]
+                if all((byte & 0x80) == 0 for byte in size_bytes):
+                    tag_size = ((size_bytes[0] & 0x7f) << 21) | ((size_bytes[1] & 0x7f) << 14) | ((size_bytes[2] & 0x7f) << 7) | (size_bytes[3] & 0x7f)
+                    result["id3_tag_size"] = tag_size
+                    offset = 10 + tag_size + (10 if data[5] & 0x10 else 0)
+                else:
+                    result["id3_tag_size"] = -1
+                    result["id3_size_error"] = "invalid_synchsafe_size"
+            result["audio_start_offset"] = offset
+            sync_offset, header = -1, None
+            for pos in range(max(0, offset), max(0, len(data) - 3)):
+                candidate = int.from_bytes(data[pos:pos + 4], "big")
+                if (candidate & 0xffe00000) == 0xffe00000:
+                    version_bits = (candidate >> 19) & 3
+                    layer_bits = (candidate >> 17) & 3
+                    bitrate_index = (candidate >> 12) & 15
+                    sample_index = (candidate >> 10) & 3
+                    if version_bits != 1 and layer_bits == 1 and bitrate_index not in (0, 15) and sample_index != 3:
+                        sync_offset, header = pos, candidate
+                        break
+            if header is None:
+                result["xing_info_marker"] = "mpeg_frame_not_found_in_first_64kb"
+                return result
+            result["mpeg_sync_offset"] = sync_offset
+            version_bits = (header >> 19) & 3
+            bitrate_index = (header >> 12) & 15
+            sample_index = (header >> 10) & 3
+            protection_bit = (header >> 16) & 1
+            channel_mode_bits = (header >> 6) & 3
+            result["mpeg_version"] = {3: "MPEG1", 2: "MPEG2", 0: "MPEG2.5"}.get(version_bits, "reserved")
+            result["mpeg_layer"] = "Layer III"
+            bitrate_tables = {
+                3: [0, 32, 40, 48, 56, 64, 80, 96, 112, 128, 160, 192, 224, 256, 320, 0],
+                2: [0, 8, 16, 24, 32, 40, 48, 56, 64, 80, 96, 112, 128, 144, 160, 0],
+                0: [0, 8, 16, 24, 32, 40, 48, 56, 64, 80, 96, 112, 128, 144, 160, 0]
+            }
+            sample_rates = {3: [44100, 48000, 32000], 2: [22050, 24000, 16000], 0: [11025, 12000, 8000]}
+            result["bitrate_kbps"] = bitrate_tables.get(version_bits, [0] * 16)[bitrate_index]
+            result["sample_rate"] = sample_rates.get(version_bits, [0, 0, 0])[sample_index]
+            result["channel_mode"] = {0: "stereo", 1: "joint_stereo", 2: "dual_channel", 3: "mono"}.get(channel_mode_bits, "unknown")
+            result["crc_protected"] = protection_bit == 0
+            side_info = (17 if channel_mode_bits == 3 else 32) if version_bits == 3 else (9 if channel_mode_bits == 3 else 17)
+            xing_offset = sync_offset + 4 + (2 if result["crc_protected"] else 0) + side_info
+            result["xing_info_offset"] = xing_offset
+            marker = data[xing_offset:xing_offset + 4]
+            if marker in (b"Xing", b"Info"):
+                result["xing_info_marker"] = marker.decode("ascii")
+                if len(data) >= xing_offset + 8:
+                    flags = int.from_bytes(data[xing_offset + 4:xing_offset + 8], "big")
+                    result["xing_flags"] = flags
+                    cursor = xing_offset + 8
+                    if flags & 1 and len(data) >= cursor + 4:
+                        result["xing_frame_count"] = int.from_bytes(data[cursor:cursor + 4], "big")
+                        cursor += 4
+                    if flags & 2 and len(data) >= cursor + 4:
+                        result["xing_byte_count"] = int.from_bytes(data[cursor:cursor + 4], "big")
+            else:
+                result["xing_info_marker"] = marker.decode("ascii", errors="replace") or "absent"
+            vbri_offset = sync_offset + 4 + 32
+            result["vbri_marker"] = "VBRI" if data[vbri_offset:vbri_offset + 4] == b"VBRI" else "absent"
+        except Exception as exc:
+            result["inspection_error"] = str(exc)
+        return result
+
     def _decode_mp3_file(self, path):
         command = [
             self.ffmpeg, "-hide_banner", "-v", "error", "-xerror", "-err_detect", "explode",
@@ -322,8 +407,15 @@ class EasySaveApp:
             "format_name": "unknown", "format_bit_rate": 0,
             "duration": "unknown", "mean_volume": "unknown",
             "channel_analysis": "not_run", "decode_returncode": -1,
+            "frame_header_analysis": {},
             "probe_error": "", "decode_error": ""
         }
+        try:
+            result["frame_header_analysis"] = self._inspect_mp3_frame_header(path)
+            self.log_event("mp3_frame_header_analysis", path=path.name, **result["frame_header_analysis"])
+        except Exception as exc:
+            result["frame_header_analysis"] = {"inspection_error": str(exc)}
+            self.log_event("mp3_frame_header_analysis_failed", path=path.name, error=str(exc))
         try:
             result.update(self._probe_mp3_file(path))
         except Exception as exc:
