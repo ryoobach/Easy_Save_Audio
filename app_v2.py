@@ -25,7 +25,7 @@ except ImportError:
     TkinterDnD = None
 
 APP_NAME = "Easy Save Audio & Video"
-APP_VERSION = "2.2.6"
+APP_VERSION = "2.2.7"
 APPDATA = Path(os.environ.get("APPDATA", str(Path.home()))) / "EasySaveAudio"
 APPDATA.mkdir(parents=True, exist_ok=True)
 SETTINGS_FILE = APPDATA / "settings.json"
@@ -914,13 +914,14 @@ class EasySaveApp:
                 self.ffmpeg, "-y", "-hide_banner", "-loglevel", "error",
                 "-i", str(pcm_path), "-map", "0:a:0", "-vn", "-map_metadata", "-1",
                 "-af", "loudnorm=I=-14:TP=-1.0:LRA=11", "-codec:a", "libmp3lame",
-                "-b:a", "320k", "-ar", "44100", "-ac", "2",
+                "-joint_stereo", "0", "-b:a", "320k", "-ar", "44100", "-ac", "2",
                 "-write_xing", "0", "-id3v2_version", "3", "-f", "mp3", str(target)
             ]
             self.log_event(
                 "ffmpeg_encode_started", job_id=job_id, input_file=source,
                 intermediate_file=pcm_path, output_file=target, bitrate="320k",
-                compatibility_profile="pcm_s16le_wav_to_cbr_no_xing_id3v2_3",
+                compatibility_profile="pcm_s16le_wav_to_cbr_no_xing_id3v2_3_forced_stereo",
+                joint_stereo="disabled",
                 source_audio_codec=source_audio.get("codec", "unknown")
             )
             self.emit(job_id, "MP3 인코딩 중", None, None)
