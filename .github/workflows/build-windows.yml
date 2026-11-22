@@ -59,11 +59,16 @@ jobs:
           $archive = [System.IO.Compression.ZipFile]::OpenRead((Join-Path (Get-Location) "dist/$zipName"))
           try {
             $entries = @($archive.Entries | Where-Object { -not $_.FullName.EndsWith("/") })
-            $hasExe = @($entries | Where-Object { $_.FullName -eq "$appExe/$appExe.exe" }).Count -eq 1
-            $hasInternal = @($entries | Where-Object { $_.FullName -like "$appExe/_internal/*" }).Count -gt 0
-            $hasManual = @($entries | Where-Object { $_.FullName -eq "$appExe/Easy_Save_Audio_Video_기능설명서_v2.2.6.md" }).Count -eq 1
+            # Compress-Archive may store paths with or without the enclosing app folder,
+            # so verify required files by their path suffix rather than one fixed prefix.
+            $hasExe = @($entries | Where-Object { $_.FullName -match ("(^|/)" + [regex]::Escape("$appExe.exe") + "$") }).Count -eq 1
+            $hasInternal = @($entries | Where-Object { $_.FullName -match "(^|/)_internal/" }).Count -gt 0
+            $hasManual = @($entries | Where-Object { $_.FullName -match ("(^|/)" + [regex]::Escape("Easy_Save_Audio_Video_기능설명서_v2.2.6.md") + "$") }).Count -eq 1
             if (-not $hasExe -or -not $hasInternal -or -not $hasManual) {
-              throw "Onedir ZIP verification failed: launcher, _internal files, or feature manual are missing."
+              Write-Host "ZIP entry paths (first 60):"
+              $entries | Select-Object -First 60 | ForEach-Object { Write-Host $_.FullName }
+              Write-Host "Verification flags: launcher=$hasExe internal=$hasInternal manual=$hasManual"
+              throw "Onedir ZIP verification failed: required launcher, _internal runtime files, or feature manual were not found."
             }
           } finally {
             $archive.Dispose()
