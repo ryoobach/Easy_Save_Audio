@@ -24,7 +24,7 @@ except ImportError:
     TkinterDnD = None
 
 APP_NAME = "Easy Save Audio & Video"
-APP_VERSION = "2.2.3"
+APP_VERSION = "2.2.4"
 APPDATA = Path(os.environ.get("APPDATA", str(Path.home()))) / "EasySaveAudio"
 APPDATA.mkdir(parents=True, exist_ok=True)
 SETTINGS_FILE = APPDATA / "settings.json"
@@ -103,11 +103,23 @@ class EasySaveApp:
         self.logger = logging.getLogger("EasySaveAudio")
         self.logger.setLevel(logging.INFO)
         self.logger.handlers.clear()
-        handler = logging.FileHandler(DIAGNOSTIC_LOG, encoding="utf-8")
+        # Append forever: no RotatingFileHandler, size cap, backup count, or automatic deletion.
+        handler = logging.FileHandler(DIAGNOSTIC_LOG, mode="a", encoding="utf-8", delay=False)
         handler.setFormatter(logging.Formatter("%(asctime)s | %(levelname)s | %(message)s"))
         self.logger.addHandler(handler)
         self.logger.propagate = False
         self.logger.info("app_started version=%s platform=windows", APP_VERSION)
+        try:
+            existing_log_size = DIAGNOSTIC_LOG.stat().st_size if DIAGNOSTIC_LOG.exists() else 0
+            self.logger.info("diagnostic_log_storage %s", json.dumps({
+                "append_mode": True, "rotation_enabled": False, "size_limit_bytes": None,
+                "existing_size_bytes": existing_log_size
+            }))
+            for active_handler in self.logger.handlers:
+                active_handler.flush()
+        except OSError:
+            # Keep the application available if the disk is full or the log location is unavailable.
+            pass
         self.events = queue.Queue()
         self.jobs = {}
         self.job_counter = 0
@@ -826,8 +838,8 @@ class EasySaveApp:
                    "-map", "0:a:0", "-vn", "-map_metadata", "-1",
                    "-af", "loudnorm=I=-14:TP=-1.0:LRA=11", "-codec:a", "libmp3lame",
                    "-b:a", "320k", "-ar", "44100", "-ac", "2",
-                   "-write_xing", "1", "-id3v2_version", "3", "-f", "mp3", str(target)]
-        self.log_event("ffmpeg_encode_started", job_id=job_id, input_file=source, output_file=target, bitrate="320k")
+                   "-write_xing", "0", "-id3v2_version", "3", "-f", "mp3", str(target)]
+        self.log_event("ffmpeg_encode_started", job_id=job_id, input_file=source, output_file=target, bitrate="320k", compatibility_profile="cbr_no_xing_id3v2_3")
         self.emit(job_id, "MP3 인코딩 중", None, None)
         process = subprocess.Popen(command, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE,
                                    creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
