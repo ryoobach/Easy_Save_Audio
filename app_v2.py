@@ -25,7 +25,7 @@ except ImportError:
     TkinterDnD = None
 
 APP_NAME = "Easy Save Audio & Video"
-APP_VERSION = "2.2.9"
+APP_VERSION = "2.3.0"
 APPDATA = Path(os.environ.get("APPDATA", str(Path.home()))) / "EasySaveAudio"
 APPDATA.mkdir(parents=True, exist_ok=True)
 SETTINGS_FILE = APPDATA / "settings.json"
@@ -1006,16 +1006,17 @@ class EasySaveApp:
                 self.ffmpeg, "-y", "-hide_banner", "-loglevel", "error",
                 "-i", str(pcm_path), "-map", "0:a:0", "-vn", "-map_metadata", "-1",
                 "-af", "loudnorm=I=-14:TP=-1.0:LRA=11", "-codec:a", "libmp3lame",
-                # Use libmp3lame's standard stereo-mode selection and emit the
-                # standard Xing/Info frame for duration and seeking compatibility.
-                "-b:a", "320k", "-ar", "44100", "-ac", "2",
-                "-write_xing", "1", "-id3v2_version", "3", "-f", "mp3", str(target)
+                # Compatibility-first profile for older Winamp decoders:
+                # MPEG-1 Layer III, CBR 192 kbps, 44.1 kHz stereo, no Xing/Info
+                # seek frame, and ID3v2.3 metadata.
+                "-b:a", "192k", "-ar", "44100", "-ac", "2",
+                "-write_xing", "0", "-id3v2_version", "3", "-f", "mp3", str(target)
             ]
             self.log_event(
                 "ffmpeg_encode_started", job_id=job_id, input_file=source,
-                intermediate_file=pcm_path, output_file=target, bitrate="320k",
-                compatibility_profile="pcm_s16le_wav_to_cbr_xing_id3v2_3_lame_default_stereo_mode",
-                joint_stereo="libmp3lame_default", xing_header="enabled",
+                intermediate_file=pcm_path, output_file=target, bitrate="192k",
+                compatibility_profile="pcm_s16le_wav_to_mpeg1_layer3_cbr_192k_no_xing_id3v2_3",
+                joint_stereo="libmp3lame_default", xing_header="disabled",
                 source_audio_codec=source_audio.get("codec", "unknown")
             )
             self.emit(job_id, "MP3 인코딩 중", None, None)
