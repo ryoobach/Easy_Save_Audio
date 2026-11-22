@@ -9,6 +9,7 @@ import shutil
 import subprocess
 import sys
 import threading
+import tempfile
 import time
 import urllib.parse
 from concurrent.futures import ThreadPoolExecutor
@@ -24,7 +25,7 @@ except ImportError:
     TkinterDnD = None
 
 APP_NAME = "Easy Save Audio & Video"
-APP_VERSION = "2.2.4"
+APP_VERSION = "2.2.5"
 APPDATA = Path(os.environ.get("APPDATA", str(Path.home()))) / "EasySaveAudio"
 APPDATA.mkdir(parents=True, exist_ok=True)
 SETTINGS_FILE = APPDATA / "settings.json"
@@ -834,63 +835,158 @@ class EasySaveApp:
         target.parent.mkdir(parents=True, exist_ok=True)
         if target.exists():
             target = target.with_name(target.stem + "_" + datetime.now().strftime("%H%M%S") + target.suffix)
-        command = [self.ffmpeg, "-y", "-hide_banner", "-loglevel", "error", "-i", str(source),
-                   "-map", "0:a:0", "-vn", "-map_metadata", "-1",
-                   "-af", "loudnorm=I=-14:TP=-1.0:LRA=11", "-codec:a", "libmp3lame",
-                   "-b:a", "320k", "-ar", "44100", "-ac", "2",
-                   "-write_xing", "0", "-id3v2_version", "3", "-f", "mp3", str(target)]
-        self.log_event("ffmpeg_encode_started", job_id=job_id, input_file=source, output_file=target, bitrate="320k", compatibility_profile="cbr_no_xing_id3v2_3")
-        self.emit(job_id, "MP3 인코딩 중", None, None)
-        process = subprocess.Popen(command, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE,
-                                   creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
-        while process.poll() is None:
-            if cancel.wait(0.2):
-                process.terminate()
-                raise RuntimeError("사용자가 작업을 취소했습니다.")
-        error = process.stderr.read().decode("utf-8", errors="replace") if process.stderr else ""
-        if process.returncode != 0 or not target.exists() or target.stat().st_size < 1024:
-            self.log_event("mp3_encode_failed", job_id=job_id, returncode=process.returncode,
-                           exists=target.exists(), size=target.stat().st_size if target.exists() else 0,
-                           ffmpeg_error=error[-3000:])
-            raise RuntimeError(error or "MP3 변환 결과 파일을 만들지 못했습니다.")
 
-        # 인코딩 성공과 사후 진단을 분리합니다. 진단 도구나 메타데이터
-        # 판독에 문제가 있어도 정상 생성된 사용자 파일은 보존하고 변환을 완료 처리합니다.
-        inspection = self._inspect_mp3_file(target)
-        validation_reasons = []
-        if inspection["probe_error"]:
-            validation_reasons.append("ffprobe_unavailable_or_failed")
-        if inspection["codec"] != "mp3":
-            validation_reasons.append("input_codec_not_mp3")
-        if inspection["sample_rate"] != 44100:
-            validation_reasons.append("sample_rate_not_44100")
-        if inspection["channels"] != 2:
-            validation_reasons.append("channel_count_not_stereo")
-        if inspection["decode_returncode"] != 0:
-            validation_reasons.append("full_decode_failed")
-        fields = {
-            "job_id": job_id, "size": inspection["size"],
-            "duration": inspection["duration"], "codec": inspection["codec"],
-            "sample_rate": inspection["sample_rate"], "channels": inspection["channels"],
-            "channel_layout": inspection["channel_layout"],
-            "profile": inspection["profile"],
-            "stream_bit_rate": inspection["stream_bit_rate"],
-            "start_time": inspection["start_time"],
-            "format_name": inspection["format_name"],
-            "format_bit_rate": inspection["format_bit_rate"],
-            "mean_volume": inspection["mean_volume"],
-            "channel_analysis": inspection["channel_analysis"],
-            "decode_returncode": inspection["decode_returncode"],
-            "validation_reasons": validation_reasons,
-            "probe_error": inspection["probe_error"], "decode_error": inspection["decode_error"]
-        }
-        self.log_event("mp3_validation", **fields)
-        if validation_reasons:
-            self.log_event("mp3_diagnostic_warning_output_preserved", **fields)
-        self.log_event("ffmpeg_encode_completed", job_id=job_id, output_file=target,
-                       size=inspection["size"], duration=inspection["duration"],
-                       codec=inspection["codec"], sample_rate=inspection["sample_rate"],
-                       channels=inspection["channels"], mean_volume=inspection["mean_volume"])
+        # Inspect the original audio stream, then normalize every source codec through PCM WAV.
+        try:
+            source_audio = self._probe_mp3_file(source)
+        except Exception as exc:
+            source_audio = {
+                "codec": "unknown", "sample_rate": 0, "channels": 0,
+                "channel_layout": "unknown", "profile": "unknown",
+                "stream_bit_rate": 0, "start_time": "unknown",
+                "format_name": "unknown", "format_bit_rate": 0,
+                "duration": "unknown", "probe_error": str(exc)
+            }
+        self.log_event(
+            "source_audio_stream_inspected", job_id=job_id, input_file=source,
+            source_audio_codec=source_audio.get("codec", "unknown"),
+            source_sample_rate=source_audio.get("sample_rate", 0),
+            source_channels=source_audio.get("channels", 0),
+            source_channel_layout=source_audio.get("channel_layout", "unknown"),
+            source_profile=source_audio.get("profile", "unknown"),
+            source_bit_rate=source_audio.get("stream_bit_rate", 0),
+            source_format_name=source_audio.get("format_name", "unknown"),
+            source_duration=source_audio.get("duration", "unknown"),
+            source_probe_error=source_audio.get("probe_error", "")
+        )
+
+        temp_dir = APPDATA / "temp"
+        temp_dir.mkdir(parents=True, exist_ok=True)
+        handle = tempfile.NamedTemporaryFile(
+            prefix="easysave_pcm_", suffix=".wav", dir=str(temp_dir), delete=False
+        )
+        pcm_path = Path(handle.name)
+        handle.close()
+        try:
+            if cancel.is_set():
+                raise RuntimeError("사용자가 작업을 취소했습니다.")
+
+            decode_command = [
+                self.ffmpeg, "-y", "-hide_banner", "-loglevel", "error",
+                "-i", str(source), "-map", "0:a:0", "-vn",
+                "-c:a", "pcm_s16le", "-ar", "44100", "-ac", "2",
+                "-f", "wav", str(pcm_path)
+            ]
+            self.log_event(
+                "source_audio_pcm_decode_started", job_id=job_id,
+                source_file=source, source_audio_codec=source_audio.get("codec", "unknown"),
+                intermediate_format="pcm_s16le_wav", sample_rate=44100, channels=2
+            )
+            self.emit(job_id, "원본 오디오 디코딩 중", None, None)
+            process = subprocess.Popen(
+                decode_command, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE,
+                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0)
+            )
+            while process.poll() is None:
+                if cancel.wait(0.2):
+                    process.terminate()
+                    try:
+                        process.wait(timeout=5)
+                    except subprocess.TimeoutExpired:
+                        process.kill()
+                    raise RuntimeError("사용자가 작업을 취소했습니다.")
+            decode_error = process.stderr.read().decode("utf-8", errors="replace") if process.stderr else ""
+            if process.returncode != 0 or not pcm_path.exists() or pcm_path.stat().st_size < 1024:
+                self.log_event(
+                    "source_audio_pcm_decode_failed", job_id=job_id,
+                    returncode=process.returncode, ffmpeg_error=decode_error[-3000:]
+                )
+                raise RuntimeError(decode_error or "원본 오디오를 PCM으로 디코딩하지 못했습니다.")
+            self.log_event(
+                "source_audio_pcm_decode_completed", job_id=job_id,
+                intermediate_file_size=pcm_path.stat().st_size
+            )
+
+            if cancel.is_set():
+                raise RuntimeError("사용자가 작업을 취소했습니다.")
+            encode_command = [
+                self.ffmpeg, "-y", "-hide_banner", "-loglevel", "error",
+                "-i", str(pcm_path), "-map", "0:a:0", "-vn", "-map_metadata", "-1",
+                "-af", "loudnorm=I=-14:TP=-1.0:LRA=11", "-codec:a", "libmp3lame",
+                "-b:a", "320k", "-ar", "44100", "-ac", "2",
+                "-write_xing", "0", "-id3v2_version", "3", "-f", "mp3", str(target)
+            ]
+            self.log_event(
+                "ffmpeg_encode_started", job_id=job_id, input_file=source,
+                intermediate_file=pcm_path, output_file=target, bitrate="320k",
+                compatibility_profile="pcm_s16le_wav_to_cbr_no_xing_id3v2_3",
+                source_audio_codec=source_audio.get("codec", "unknown")
+            )
+            self.emit(job_id, "MP3 인코딩 중", None, None)
+            process = subprocess.Popen(
+                encode_command, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE,
+                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0)
+            )
+            while process.poll() is None:
+                if cancel.wait(0.2):
+                    process.terminate()
+                    try:
+                        process.wait(timeout=5)
+                    except subprocess.TimeoutExpired:
+                        process.kill()
+                    raise RuntimeError("사용자가 작업을 취소했습니다.")
+            error = process.stderr.read().decode("utf-8", errors="replace") if process.stderr else ""
+            if process.returncode != 0 or not target.exists() or target.stat().st_size < 1024:
+                self.log_event(
+                    "mp3_encode_failed", job_id=job_id, returncode=process.returncode,
+                    exists=target.exists(), size=target.stat().st_size if target.exists() else 0,
+                    ffmpeg_error=error[-3000:]
+                )
+                raise RuntimeError(error or "MP3 변환 결과 파일을 만들지 못했습니다.")
+
+            # Preserve the successfully encoded output even if post-encode diagnostics fail.
+            inspection = self._inspect_mp3_file(target)
+            validation_reasons = []
+            if inspection["probe_error"]:
+                validation_reasons.append("ffprobe_unavailable_or_failed")
+            if inspection["codec"] != "mp3":
+                validation_reasons.append("input_codec_not_mp3")
+            if inspection["sample_rate"] != 44100:
+                validation_reasons.append("sample_rate_not_44100")
+            if inspection["channels"] != 2:
+                validation_reasons.append("channel_count_not_stereo")
+            if inspection["decode_returncode"] != 0:
+                validation_reasons.append("full_decode_failed")
+            fields = {
+                "job_id": job_id, "size": inspection["size"],
+                "duration": inspection["duration"], "codec": inspection["codec"],
+                "sample_rate": inspection["sample_rate"], "channels": inspection["channels"],
+                "channel_layout": inspection["channel_layout"], "profile": inspection["profile"],
+                "stream_bit_rate": inspection["stream_bit_rate"],
+                "start_time": inspection["start_time"], "format_name": inspection["format_name"],
+                "format_bit_rate": inspection["format_bit_rate"], "mean_volume": inspection["mean_volume"],
+                "channel_analysis": inspection["channel_analysis"],
+                "decode_returncode": inspection["decode_returncode"],
+                "validation_reasons": validation_reasons,
+                "probe_error": inspection["probe_error"], "decode_error": inspection["decode_error"]
+            }
+            self.log_event("mp3_validation", **fields)
+            if validation_reasons:
+                self.log_event("mp3_diagnostic_warning_output_preserved", **fields)
+            self.log_event(
+                "ffmpeg_encode_completed", job_id=job_id, output_file=target,
+                size=inspection["size"], duration=inspection["duration"],
+                codec=inspection["codec"], sample_rate=inspection["sample_rate"],
+                channels=inspection["channels"], mean_volume=inspection["mean_volume"],
+                source_audio_codec=source_audio.get("codec", "unknown"),
+                intermediate_format="pcm_s16le_wav"
+            )
+        finally:
+            try:
+                pcm_path.unlink(missing_ok=True)
+                self.log_event("temporary_pcm_file_removed", job_id=job_id, path=pcm_path)
+            except OSError as exc:
+                self.log_event("temporary_pcm_file_cleanup_failed", job_id=job_id, path=pcm_path, error=str(exc))
 
     def process_local(self, job_id, source, outputs, cancel):
         if cancel.is_set():
