@@ -24,7 +24,7 @@ except ImportError:
     TkinterDnD = None
 
 APP_NAME = "Easy Save Audio & Video"
-APP_VERSION = "2.2.0"
+APP_VERSION = "2.2.1"
 APPDATA = Path(os.environ.get("APPDATA", str(Path.home()))) / "EasySaveAudio"
 APPDATA.mkdir(parents=True, exist_ok=True)
 SETTINGS_FILE = APPDATA / "settings.json"
@@ -114,7 +114,7 @@ class EasySaveApp:
         style.configure("Utility.TButton", padding=(10, 6))
         style.configure("Action.TButton", padding=(10, 6), font=("Malgun Gothic", 9))
         style.configure("About.TButton", padding=(4, 0), font=("Segoe UI", 18, "bold"))
-        style.configure("Icon.TButton", padding=(7, 5), font=("Segoe UI Symbol", 10), width=10)
+        style.configure("Icon.TButton", padding=(7, 5), font=("Segoe UI Symbol", 14), width=4)
         outer = ttk.Frame(self.root, padding=(16, 10))
         outer.pack(fill="both", expand=True)
 
@@ -147,11 +147,11 @@ class EasySaveApp:
         # 하단 조작 버튼을 먼저 bottom에 고정해 작업 목록이 버튼을 밀어내지 않도록 합니다.
         controls = ttk.Frame(outer)
         controls.pack(side="bottom", fill="x", pady=(5, 0))
-        # 하단 기능은 아이콘을 위에, 기능명을 아래에 배치해 한눈에 구분합니다.
-        ttk.Button(controls, text="✕\n작업 취소", command=self.cancel_selected, style="Icon.TButton").pack(side="left", padx=(0, 5))
-        ttk.Button(controls, text="▤\n작업 기록", command=self.show_history, style="Icon.TButton").pack(side="left", padx=5)
-        ttk.Button(controls, text="⌕\n파일 진단", command=self.run_file_diagnostic, style="Icon.TButton").pack(side="left", padx=5)
-        ttk.Button(controls, text="☷\n진단 로그", command=self.show_diagnostic_log, style="Icon.TButton").pack(side="left", padx=5)
+        # 하단 기능 버튼은 요청에 따라 한글 없이 아이콘만 표시합니다.
+        ttk.Button(controls, text="✕", command=self.cancel_selected, style="Icon.TButton").pack(side="left", padx=(0, 5))
+        ttk.Button(controls, text="▤", command=self.show_history, style="Icon.TButton").pack(side="left", padx=5)
+        ttk.Button(controls, text="⌕", command=self.run_file_diagnostic, style="Icon.TButton").pack(side="left", padx=5)
+        ttk.Button(controls, text="☷", command=self.show_diagnostic_log, style="Icon.TButton").pack(side="left", padx=5)
         ttk.Label(controls, text="다운로드 및 변환 작업은 각각 독립적으로 처리됩니다.", foreground="#666").pack(side="right")
 
         queue_header = ttk.Frame(outer)
@@ -224,7 +224,11 @@ class EasySaveApp:
                 creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0)
             )
             output = check.stderr or ""
-            stream = re.search(r"Audio:\s*([^,\s]+),\s*(\d+)\s*Hz,\s*([^\r\n,]+)", output, re.I)
+            # FFmpeg also prints the decoded null-output stream (pcm_s16le).
+            # Read the codec and stream properties only from the input MP3 section.
+            input_match = re.search(r"Input #0.*?(?=\nOutput #0|\Z)", output, re.I | re.S)
+            input_info = input_match.group(0) if input_match else output
+            stream = re.search(r"Audio:\s*([^,\s]+),\s*(\d+)\s*Hz,\s*([^\r\n,]+)", input_info, re.I)
             volume = re.search(r"mean_volume:\s*(-?inf|[-+]?\d+(?:\.\d+)?)\s*dB", output)
             if stream:
                 result["codec"] = stream.group(1).lower()
@@ -755,24 +759,34 @@ class EasySaveApp:
                                 text=True, encoding="utf-8", errors="replace",
                                 creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
         verify_text = verify.stderr or ""
+        # Separate the source MP3 stream from FFmpeg's decoded PCM output stream.
+        # pcm_s16le is expected for the null output and is not the MP3 file codec.
+        input_match = re.search(r"Input #0.*?(?=\nOutput #0|\Z)", verify_text, re.I | re.S)
+        input_info = input_match.group(0) if input_match else verify_text
         mean_match = re.search(r"mean_volume:\s*(-?inf|[-+]?\d+(?:\.\d+)?)\s*dB", verify_text)
-        duration_match = re.search(r"Duration:\s*(\d{2}:\d{2}:\d{2}(?:\.\d+)?)", verify_text)
-        stream_match = re.search(r"Audio:\s*([^,\s]+),\s*(\d+)\s*Hz,\s*([^,\r\n]+)", verify_text, re.I)
+        duration_match = re.search(r"Duration:\s*(\d{2}:\d{2}:\d{2}(?:\.\d+)?)", input_info)
+        stream_match = re.search(r"Audio:\s*([^,\s]+),\s*(\d+)\s*Hz,\s*([^,\r\n]+)", input_info, re.I)
         mean_volume = mean_match.group(1) if mean_match else "unknown"
         duration = duration_match.group(1) if duration_match else "unknown"
         codec = stream_match.group(1).lower() if stream_match else "unknown"
         sample_rate = int(stream_match.group(2)) if stream_match else 0
         channel_layout = stream_match.group(3).split(",")[0].strip().lower() if stream_match else "unknown"
+        validation_reasons = []
+        if verify.returncode != 0: validation_reasons.append("full_decode_failed")
+        if codec != "mp3": validation_reasons.append("input_codec_not_mp3")
+        if sample_rate != 44100: validation_reasons.append("sample_rate_not_44100")
+        if channel_layout != "stereo": validation_reasons.append("channel_layout_not_stereo")
         self.log_event("mp3_validation", job_id=job_id, size=target.stat().st_size,
                        duration=duration, codec=codec, sample_rate=sample_rate,
                        channel_layout=channel_layout, mean_volume=mean_volume,
-                       decode_returncode=verify.returncode)
-        if (verify.returncode != 0 or codec != "mp3" or sample_rate != 44100
-                or channel_layout != "stereo" or mean_volume in ("unknown", "inf", "-inf")):
-            target.unlink(missing_ok=True)
+                       decode_returncode=verify.returncode,
+                       validation_reasons=validation_reasons,
+                       ffmpeg_diagnostic=verify_text[-2500:])
+        # Preserve the output file; validation errors must never delete user data.
+        if validation_reasons:
             raise RuntimeError(
-                "MP3 표준 규격 또는 오디오 검증에 실패했습니다. "
-                "진단 로그에서 코덱·샘플레이트·채널·음량 정보를 확인해 주세요."
+                "MP3 파일 검증에서 실제 형식 또는 디코딩 문제를 발견했습니다. "
+                "생성된 파일은 보존했습니다. 진단 로그를 확인해 주세요."
             )
         self.log_event("ffmpeg_encode_completed", job_id=job_id, output_file=target,
                        size=target.stat().st_size, duration=duration, codec=codec,
