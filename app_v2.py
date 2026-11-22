@@ -105,8 +105,8 @@ class EasySaveApp:
         self.logger = logging.getLogger("EasySaveAudio")
         self.logger.setLevel(logging.INFO)
         self.logger.handlers.clear()
-        # Start each application session with a clean log; records append for the lifetime of this run.
-        handler = logging.FileHandler(DIAGNOSTIC_LOG, mode="w", encoding="utf-8", delay=False)
+        # Keep one diagnostic log across application restarts; append without rotation or size limit.
+        handler = logging.FileHandler(DIAGNOSTIC_LOG, mode="a", encoding="utf-8", delay=False)
         handler.setFormatter(logging.Formatter("%(asctime)s | %(levelname)s | %(message)s"))
         self.logger.addHandler(handler)
         self.logger.propagate = False
@@ -114,7 +114,7 @@ class EasySaveApp:
         try:
             existing_log_size = DIAGNOSTIC_LOG.stat().st_size if DIAGNOSTIC_LOG.exists() else 0
             self.logger.info("diagnostic_log_storage %s", json.dumps({
-                "startup_reset": True, "append_mode_within_session": True,
+                "startup_reset": False, "append_mode_within_session": True,
                 "rotation_enabled": False, "size_limit_bytes": None,
                 "existing_size_bytes_after_startup": existing_log_size
             }))
@@ -1067,7 +1067,21 @@ class EasySaveApp:
             target = target.with_name(target.stem + "_" + datetime.now().strftime("%H%M%S") + target.suffix)
 
         selected_profile = MP3_TEST_PROFILE
-        pcm_sample_rate = 48000 if selected_profile == "G_48KHZ" else 44100
+        profile_settings = {
+            "J_LAME_BASELINE": {"bitrate": "320k", "channels": 2, "rate": 44100, "reservoir": "0", "xing": "1", "id3": "3", "vbr": False, "loudnorm": True},
+            "K_RESERVOIR_ON": {"bitrate": "320k", "channels": 2, "rate": 44100, "reservoir": "1", "xing": "1", "id3": "3", "vbr": False, "loudnorm": True},
+            "L_NO_XING": {"bitrate": "320k", "channels": 2, "rate": 44100, "reservoir": "0", "xing": "0", "id3": "3", "vbr": False, "loudnorm": True},
+            "M_NO_ID3": {"bitrate": "320k", "channels": 2, "rate": 44100, "reservoir": "0", "xing": "1", "id3": "0", "vbr": False, "loudnorm": True},
+            "N_CBR_192K": {"bitrate": "192k", "channels": 2, "rate": 44100, "reservoir": "0", "xing": "1", "id3": "3", "vbr": False, "loudnorm": True},
+            "O_CBR_128K": {"bitrate": "128k", "channels": 2, "rate": 44100, "reservoir": "0", "xing": "1", "id3": "3", "vbr": False, "loudnorm": True},
+            "P_MONO_320K": {"bitrate": "320k", "channels": 1, "rate": 44100, "reservoir": "0", "xing": "1", "id3": "3", "vbr": False, "loudnorm": True},
+            "Q_MONO_192K": {"bitrate": "192k", "channels": 1, "rate": 44100, "reservoir": "0", "xing": "1", "id3": "3", "vbr": False, "loudnorm": True},
+            "R_VBR_Q2": {"bitrate": None, "channels": 2, "rate": 44100, "reservoir": "0", "xing": "1", "id3": "3", "vbr": True, "loudnorm": True},
+            "S_48KHZ": {"bitrate": "320k", "channels": 2, "rate": 48000, "reservoir": "0", "xing": "1", "id3": "3", "vbr": False, "loudnorm": True},
+        }
+        cfg = profile_settings.get(selected_profile, profile_settings["J_LAME_BASELINE"])
+        pcm_sample_rate = cfg["rate"]
+        output_channels = cfg["channels"]
 
         # Inspect the original audio stream, then normalize every source codec through PCM WAV.
         try:
@@ -1107,7 +1121,7 @@ class EasySaveApp:
             decode_command = [
                 self.ffmpeg, "-y", "-hide_banner", "-loglevel", "error",
                 "-i", str(source), "-map", "0:a:0", "-vn",
-                "-c:a", "pcm_s16le", "-ar", str(pcm_sample_rate), "-ac", "2",
+                "-c:a", "pcm_s16le", "-ar", str(pcm_sample_rate), "-ac", str(output_channels),
                 "-f", "wav", str(pcm_path)
             ]
             self.log_event(
@@ -1142,31 +1156,19 @@ class EasySaveApp:
 
             if cancel.is_set():
                 raise RuntimeError("사용자가 작업을 취소했습니다.")
-            # v2.3.6 isolates Winamp compatibility variables across five build profiles.
-            # E: 192 kbps CBR; F: LAME VBR quality 2; G: 48 kHz output;
-            # H: disable loudnorm; I: enable bit reservoir and omit Xing/Info header.
+            # J-S are isolated Winamp compatibility tests. Each executable embeds one profile.
             encode_options = [
-                "-reservoir", "0", "-b:a", "320k", "-ar", str(pcm_sample_rate), "-ac", "2",
-                "-write_xing", "1", "-id3v2_version", "3"
+                "-reservoir", cfg["reservoir"], "-ar", str(pcm_sample_rate),
+                "-ac", str(output_channels), "-write_xing", cfg["xing"],
+                "-id3v2_version", cfg["id3"]
             ]
-            bitrate_label = "320k CBR"
-            if selected_profile == "E_CBR_192K":
-                encode_options[encode_options.index("-b:a") + 1] = "192k"
-                bitrate_label = "192k CBR"
-            elif selected_profile == "F_VBR_Q2":
-                bitrate_index = encode_options.index("-b:a")
-                del encode_options[bitrate_index:bitrate_index + 2]
+            if cfg["vbr"]:
                 encode_options.extend(["-q:a", "2"])
                 bitrate_label = "VBR quality 2"
-            elif selected_profile == "I_RESERVOIR_NO_XING":
-                encode_options.remove("-reservoir")
-                encode_options.remove("0")
-                xing_index = encode_options.index("-write_xing")
-                encode_options[xing_index + 1] = "0"
-            audio_filter_options = (
-                [] if selected_profile == "H_NO_LOUDNORM"
-                else ["-af", "loudnorm=I=-14:TP=-1.0:LRA=11"]
-            )
+            else:
+                encode_options.extend(["-b:a", cfg["bitrate"]])
+                bitrate_label = f'{cfg["bitrate"]} CBR'
+            audio_filter_options = ["-af", "loudnorm=I=-14:TP=-1.0:LRA=11"] if cfg["loudnorm"] else []
             encode_command = [
                 self.ffmpeg, "-y", "-hide_banner", "-loglevel", "error",
                 "-i", str(pcm_path), "-map", "0:a:0", "-vn", "-map_metadata", "-1",
@@ -1177,7 +1179,7 @@ class EasySaveApp:
                 "ffmpeg_encode_started", job_id=job_id, input_file=source,
                 intermediate_file=pcm_path, output_file=target, bitrate=bitrate_label,
                 compatibility_profile=f"v2.3.6_{selected_profile}",
-                output_sample_rate=pcm_sample_rate, output_channels=2,
+                output_sample_rate=pcm_sample_rate, output_channels=output_channels,
                 loudnorm=("disabled" if selected_profile == "H_NO_LOUDNORM" else "enabled"),
                 mp3_rate_control=("VBR quality 2" if selected_profile == "F_VBR_Q2" else "CBR"),
                 source_audio_codec=source_audio.get("codec", "unknown")
@@ -1213,8 +1215,8 @@ class EasySaveApp:
                 validation_reasons.append("input_codec_not_mp3")
             if inspection["sample_rate"] != pcm_sample_rate:
                 validation_reasons.append(f"sample_rate_not_{pcm_sample_rate}")
-            if inspection["channels"] != 2:
-                validation_reasons.append("channel_count_not_stereo")
+            if inspection["channels"] != output_channels:
+                validation_reasons.append(f"channel_count_not_{output_channels}")
             if inspection["decode_returncode"] != 0:
                 validation_reasons.append("full_decode_failed")
             fields = {
