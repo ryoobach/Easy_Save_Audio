@@ -25,7 +25,7 @@ except ImportError:
     TkinterDnD = None
 
 APP_NAME = "Easy Save Audio & Video"
-APP_VERSION = "2.3.1"
+APP_VERSION = "2.3.2"
 APPDATA = Path(os.environ.get("APPDATA", str(Path.home()))) / "EasySaveAudio"
 APPDATA.mkdir(parents=True, exist_ok=True)
 SETTINGS_FILE = APPDATA / "settings.json"
@@ -280,7 +280,10 @@ class EasySaveApp:
             "audio_bytes_scanned": 0, "gap_count": 0,
             "gap_bytes": 0, "truncated_frame": False,
             "trailing_bytes": 0, "bitrate_kbps": {},
-            "sample_rates": {}, "mpeg_versions": {}
+            "sample_rates": {}, "mpeg_versions": {},
+            "main_data_begin_nonzero_frames": 0,
+            "main_data_begin_min": None, "main_data_begin_max": None,
+            "main_data_begin_first_values": [], "side_info_parse_errors": 0
         }
         try:
             data = path.read_bytes()
@@ -336,6 +339,39 @@ class EasySaveApp:
                     result["truncated_frame"] = True
                     result["trailing_bytes"] = size - offset
                     break
+
+                # Layer III side information starts after the MPEG header and optional CRC.
+                # main_data_begin is 9 bits for MPEG-1 and 8 bits for MPEG-2/2.5.
+                protection_bit = (word >> 16) & 1
+                channel_mode = (word >> 6) & 3
+                channel_count = 1 if channel_mode == 3 else 2
+                side_info_length = (
+                    (17 if channel_count == 1 else 32) if version == 3
+                    else (9 if channel_count == 1 else 17)
+                )
+                side_info_offset = offset + 4 + (0 if protection_bit else 2)
+                side_info_end = side_info_offset + side_info_length
+                if side_info_end <= offset + frame_length and side_info_end <= size:
+                    side_info = data[side_info_offset:side_info_end]
+                    if version == 3 and len(side_info) >= 2:
+                        main_data_begin = (side_info[0] << 1) | (side_info[1] >> 7)
+                    elif version != 3 and len(side_info) >= 1:
+                        main_data_begin = side_info[0]
+                    else:
+                        result["side_info_parse_errors"] += 1
+                        main_data_begin = None
+                    if main_data_begin is not None:
+                        if main_data_begin:
+                            result["main_data_begin_nonzero_frames"] += 1
+                        current_min = result["main_data_begin_min"]
+                        current_max = result["main_data_begin_max"]
+                        result["main_data_begin_min"] = main_data_begin if current_min is None else min(current_min, main_data_begin)
+                        result["main_data_begin_max"] = main_data_begin if current_max is None else max(current_max, main_data_begin)
+                        if len(result["main_data_begin_first_values"]) < 12:
+                            result["main_data_begin_first_values"].append(main_data_begin)
+                else:
+                    result["side_info_parse_errors"] += 1
+
                 if result["first_frame_offset"] < 0:
                     result["first_frame_offset"] = offset
                 result["last_frame_offset"] = offset
@@ -495,10 +531,20 @@ class EasySaveApp:
         try:
             result["frame_header_analysis"] = self._inspect_mp3_frame_header(path)
             result["frame_header_analysis"]["full_frame_scan"] = self._scan_mp3_frames(path)
-            scan = result["frame_header_analysis"]["full_frame_scan"]
-            xing_frames = result["frame_header_analysis"].get("xing_frame_count")
+            frame_header = result["frame_header_analysis"]
+            scan = frame_header["full_frame_scan"]
+            xing_frames = frame_header.get("xing_frame_count")
             if xing_frames is not None:
-                scan["xing_frame_count_matches"] = (xing_frames == scan.get("frame_count"))
+                # FFmpeg's Xing/Info metadata frame is a physical MPEG frame but is
+                # excluded from the Xing audio-frame count. Do not report this as a mismatch.
+                has_xing_metadata_frame = (
+                    frame_header.get("xing_info_marker") in ("Xing", "Info")
+                    and frame_header.get("mpeg_sync_offset") == scan.get("first_frame_offset")
+                )
+                expected_audio_frames = max(0, scan.get("frame_count", 0) - 1) if has_xing_metadata_frame else scan.get("frame_count", 0)
+                scan["xing_metadata_frame_excluded"] = has_xing_metadata_frame
+                scan["xing_frame_count_expected"] = expected_audio_frames
+                scan["xing_frame_count_matches"] = (xing_frames == expected_audio_frames)
             self.log_event("mp3_frame_header_analysis", path=path.name, **result["frame_header_analysis"])
         except Exception as exc:
             result["frame_header_analysis"] = {"inspection_error": str(exc)}
@@ -1093,17 +1139,16 @@ class EasySaveApp:
                 self.ffmpeg, "-y", "-hide_banner", "-loglevel", "error",
                 "-i", str(pcm_path), "-map", "0:a:0", "-vn", "-map_metadata", "-1",
                 "-af", "loudnorm=I=-14:TP=-1.0:LRA=11", "-codec:a", "libmp3lame",
-                # Restore the known-good v2.2.8 baseline: MPEG-1 Layer III,
-                # CBR 320 kbps, 44.1 kHz stereo, standard Xing/Info duration index,
-                # and ID3v2.3. The 192 kbps/no-Xing experiment was inconclusive.
-                "-b:a", "320k", "-ar", "44100", "-ac", "2",
+                # Keep the known-good v2.2.8 output profile and disable the Layer III
+                # bit reservoir as a targeted Winamp-compatibility test.
+                "-reservoir", "0", "-b:a", "320k", "-ar", "44100", "-ac", "2",
                 "-write_xing", "1", "-id3v2_version", "3", "-f", "mp3", str(target)
             ]
             self.log_event(
                 "ffmpeg_encode_started", job_id=job_id, input_file=source,
                 intermediate_file=pcm_path, output_file=target, bitrate="320k",
-                compatibility_profile="pcm_s16le_wav_to_mpeg1_layer3_cbr_320k_xing_id3v2_3",
-                joint_stereo="libmp3lame_default", xing_header="enabled",
+                compatibility_profile="pcm_s16le_wav_to_mpeg1_layer3_cbr_320k_no_reservoir_xing_id3v2_3",
+                joint_stereo="libmp3lame_default", bit_reservoir="disabled", xing_header="enabled",
                 source_audio_codec=source_audio.get("codec", "unknown")
             )
             self.emit(job_id, "MP3 인코딩 중", None, None)
