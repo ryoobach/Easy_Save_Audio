@@ -54,7 +54,7 @@ jobs:
             $appExe = "EasySaveAudioVideo_v$version-$($profile.Substring(0,1))"
             $distPath = "build/profile-dist/$profile"
             $workPath = "build/profile-work/$profile"
-            python -m PyInstaller --noconfirm --clean --onedir --contents-directory "_internal" --noupx --windowed --name $appExe --distpath $distPath --workpath $workPath --specpath "build/spec" --icon "$((Resolve-Path easy_save_audio.ico).Path)" --add-data "easy_save_audio.png;." --add-data "easy_save_audio.ico;." --add-binary "$ffmpeg;." --add-binary "$ffprobe;." --collect-all yt_dlp --collect-all tkinterdnd2 app_v2.py
+            python -m PyInstaller --noconfirm --clean --onedir --contents-directory "_internal" --noupx --windowed --name $appExe --distpath $distPath --workpath $workPath --specpath "build/spec" --icon "$((Resolve-Path easy_save_audio.ico).Path)" --add-data "$((Resolve-Path easy_save_audio.png).Path);." --add-data "$((Resolve-Path easy_save_audio.ico).Path);." --add-binary "$ffmpeg;." --add-binary "$ffprobe;." --collect-all yt_dlp --collect-all tkinterdnd2 app_v2.py
             if ($LASTEXITCODE -ne 0) { throw "PyInstaller failed for profile $profile" }
             $builtDir = Join-Path $distPath $appExe
             $builtExe = Join-Path $builtDir "$appExe.exe"
