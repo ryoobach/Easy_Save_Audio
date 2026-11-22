@@ -275,7 +275,7 @@ class EasySaveApp:
             text=True, encoding="utf-8", errors="replace", timeout=900,
             creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0)
         )
-        match = re.search(r"mean_volume:\\s*(-?inf|[-+]?\\d+(?:\\.\\d+)?)\\s*dB", measured.stderr or "", re.I)
+        match = re.search(r"mean_volume:\s*(-?inf|[-+]?\d+(?:\.\d+)?)\s*dB", measured.stderr or "", re.I)
         return match.group(1) if match else "unknown"
 
     def _inspect_mp3_file(self, path):
@@ -303,7 +303,7 @@ class EasySaveApp:
             and result["sample_rate"] == 44100 and result["channels"] == 2
             and result["decode_returncode"] == 0
         )
-        result["error"] = "\\n".join(
+        result["error"] = "\n".join(
             part for part in (result["probe_error"], result["decode_error"]) if part
         )
         return result
