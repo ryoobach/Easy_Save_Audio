@@ -15,7 +15,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        profile: [E_CBR_192K, F_VBR_Q2, G_48KHZ, H_NO_LOUDNORM]
+        profile: [E_CBR_192K, F_VBR_Q2, G_48KHZ, H_NO_LOUDNORM, I_RESERVOIR_NO_XING]
     runs-on: windows-latest
     env:
       MP3_TEST_PROFILE: ${{ matrix.profile }}
