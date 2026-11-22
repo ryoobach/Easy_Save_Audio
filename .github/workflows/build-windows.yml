@@ -1,4 +1,5 @@
 name: Build Easy Save Audio & Video (Windows x64)
+# v2.2.2 packages ffprobe.exe and the Korean feature guide with the Windows app.
 on:
   push:
     branches: [ main ]
