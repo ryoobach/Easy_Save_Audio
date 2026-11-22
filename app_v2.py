@@ -25,7 +25,7 @@ except ImportError:
     TkinterDnD = None
 
 APP_NAME = "Easy Save Audio & Video"
-APP_VERSION = "2.3.7"
+APP_VERSION = "2.3.8"
 MP3_TEST_PROFILE = "BASELINE"
 APPDATA = Path(os.environ.get("APPDATA", str(Path.home()))) / "EasySaveAudio"
 APPDATA.mkdir(parents=True, exist_ok=True)
@@ -1195,7 +1195,26 @@ class EasySaveApp:
                 encode_command.extend([
                     "--id3v2-only", "--tt", Path(source).stem[:30]
                 ])
-            encode_command.extend([str(pcm_path), str(target)])
+            # LAME 4.0 on Windows may fail to open Unicode/emoji output paths.
+            # Always let LAME write to an ASCII-only path, then move the completed
+            # MP3 to the user's original Unicode filename using Python.
+            lame_temp_root = Path(os.environ.get("WINDIR", r"C:\Windows")) / "Temp" / "EasySaveAudio"
+            if not str(lame_temp_root).isascii():
+                lame_temp_root = Path(r"C:\Temp") / "EasySaveAudio"
+            lame_temp_root.mkdir(parents=True, exist_ok=True)
+            lame_temp_fd, lame_temp_name = tempfile.mkstemp(
+                prefix="esav_", suffix=".mp3", dir=str(lame_temp_root)
+            )
+            os.close(lame_temp_fd)
+            lame_output_path = Path(lame_temp_name)
+            lame_output_path.unlink(missing_ok=True)
+            if not str(lame_output_path).isascii():
+                raise RuntimeError("LAME 임시 출력 경로가 ASCII 문자가 아닙니다.")
+            self.log_event(
+                "lame_ascii_temp_output_prepared", job_id=job_id,
+                lame_temp_output_file=lame_output_path, final_output_file=target
+            )
+            encode_command.extend([str(pcm_path), str(lame_output_path)])
 
             version_result = subprocess.run(
                 [self.lame, "--version"], stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
@@ -1209,8 +1228,9 @@ class EasySaveApp:
             )
             self.log_event(
                 "lame_encode_started", job_id=job_id, input_file=source,
-                intermediate_file=pcm_path, output_file=target, bitrate=bitrate_label,
-                compatibility_profile=f"v2.3.7_{selected_profile}",
+                intermediate_file=pcm_path, output_file=target,
+                lame_temp_output_file=lame_output_path, bitrate=bitrate_label,
+                compatibility_profile=f"{APP_VERSION}_{selected_profile}",
                 encoder="standalone_lame", encoder_version=encoder_version,
                 output_sample_rate=pcm_sample_rate, output_channels=output_channels,
                 loudnorm=("enabled" if cfg["loudnorm"] else "disabled"),
@@ -1233,13 +1253,25 @@ class EasySaveApp:
                         process.kill()
                     raise RuntimeError("사용자가 작업을 취소했습니다.")
             error = process.stderr.read().decode("utf-8", errors="replace") if process.stderr else ""
-            if process.returncode != 0 or not target.exists() or target.stat().st_size < 1024:
+            if process.returncode != 0 or not lame_output_path.exists() or lame_output_path.stat().st_size < 1024:
                 self.log_event(
                     "mp3_encode_failed", job_id=job_id, returncode=process.returncode,
-                    exists=target.exists(), size=target.stat().st_size if target.exists() else 0,
-                    lame_error=error[-3000:]
+                    lame_temp_output_file=lame_output_path,
+                    exists=lame_output_path.exists(),
+                    size=lame_output_path.stat().st_size if lame_output_path.exists() else 0,
+                    final_output_file=target, lame_error=error[-3000:]
                 )
                 raise RuntimeError(error or "독립 실행형 LAME MP3 변환에 실패했습니다.")
+
+            # Python handles the Unicode destination path; LAME never sees it.
+            shutil.move(str(lame_output_path), str(target))
+            if not target.exists() or target.stat().st_size < 1024:
+                raise RuntimeError("LAME 임시 MP3를 최종 파일명으로 이동하지 못했습니다.")
+            self.log_event(
+                "lame_output_promoted_to_final_path", job_id=job_id,
+                lame_temp_output_file=lame_output_path, final_output_file=target,
+                final_size=target.stat().st_size
+            )
 
             # Preserve the successfully encoded output even if post-encode diagnostics fail.
             inspection = self._inspect_mp3_file(target)
@@ -1279,6 +1311,12 @@ class EasySaveApp:
                 intermediate_format="pcm_s16le_wav", encoder="standalone_lame"
             )
         finally:
+            try:
+                if "lame_output_path" in locals() and lame_output_path.exists():
+                    lame_output_path.unlink(missing_ok=True)
+                    self.log_event("lame_temporary_output_removed", job_id=job_id, path=lame_output_path)
+            except OSError as exc:
+                self.log_event("lame_temporary_output_cleanup_failed", job_id=job_id, path=lame_output_path, error=str(exc))
             try:
                 pcm_path.unlink(missing_ok=True)
                 self.log_event("temporary_pcm_file_removed", job_id=job_id, path=pcm_path)
