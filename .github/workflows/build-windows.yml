@@ -1,5 +1,5 @@
 name: Build Easy Save Audio & Video (Windows x64)
-# v2.3.3 rebuilds the known-good CBR 320 kbps + Xing/Info profile and adds bit-reservoir diagnostics.
+# v2.3.4 rebuilds the known-good CBR 320 kbps + Xing/Info profile and adds bit-reservoir diagnostics.
 on:
   push:
     branches: [ main ]
@@ -35,7 +35,7 @@ jobs:
           $versionMatch = Select-String -Path app_v2.py -Pattern '^APP_VERSION = "([^"]+)"'
           if (-not $versionMatch) { throw "APP_VERSION was not found in app_v2.py" }
           $version = $versionMatch.Matches[0].Groups[1].Value
-          if ($version -ne "2.3.3") { throw "Expected version 2.3.3, found $version" }
+          if ($version -ne "2.3.4") { throw "Expected version 2.3.4, found $version" }
           "version=$version" >> $env:GITHUB_OUTPUT
           $ffmpeg = python -c "import imageio_ffmpeg; print(imageio_ffmpeg.get_ffmpeg_exe())"
           # imageio-ffmpeg bundles ffmpeg.exe only. Download ffprobe.exe separately.
@@ -52,7 +52,7 @@ jobs:
           python -m PyInstaller --noconfirm --clean --onedir --contents-directory "_internal" --noupx --windowed --name $appExe --icon "$((Resolve-Path easy_save_audio.ico).Path)" --add-data "easy_save_audio.png;." --add-data "easy_save_audio.ico;." --add-binary "$ffmpeg;." --add-binary "$ffprobe;." --collect-all yt_dlp --collect-all tkinterdnd2 app_v2.py
           if ($LASTEXITCODE -ne 0) { throw "PyInstaller onedir build failed." }
           $appDir = "dist/$appExe"
-          Copy-Item "Easy_Save_Audio_Video_기능설명서_v2.3.3.md" -Destination $appDir
+          Copy-Item "Easy_Save_Audio_Video_기능설명서_v2.3.4.md" -Destination $appDir
           $exePath = "$appDir/$appExe.exe"
           $internalDir = "$appDir/_internal"
           if (-not (Test-Path $exePath)) { throw "Application executable was not created: $exePath" }
@@ -61,32 +61,17 @@ jobs:
           $associatedIcon = [System.Drawing.Icon]::ExtractAssociatedIcon((Resolve-Path $exePath).Path)
           if ($null -eq $associatedIcon) { throw "The built EXE has no readable associated icon resource." }
           $associatedIcon.Dispose()
-          $zipName = "Easy_Save_Audio_Video_v$($version)_Windows_x64_Onedir.zip"
-          Compress-Archive -Path $appDir -DestinationPath "dist/$zipName" -CompressionLevel Optimal -Force
-          # Verify the package includes the launcher and the _internal runtime directory.
-          Add-Type -AssemblyName System.IO.Compression.FileSystem
-          $archive = [System.IO.Compression.ZipFile]::OpenRead((Join-Path (Get-Location) "dist/$zipName"))
-          try {
-            $entries = @($archive.Entries | Where-Object { -not $_.FullName.EndsWith("/") })
-            # Compress-Archive may store paths with or without the enclosing app folder,
-            # so verify required files by their path suffix rather than one fixed prefix.
-            $hasExe = @($entries | Where-Object { $_.FullName -match ("(^|/)" + [regex]::Escape("$appExe.exe") + "$") }).Count -eq 1
-            $hasInternal = @($entries | Where-Object { $_.FullName -match "(^|/)_internal/" }).Count -gt 0
-            $hasManual = @($entries | Where-Object { $_.FullName -match ("(^|/)" + [regex]::Escape("Easy_Save_Audio_Video_기능설명서_v2.3.3.md") + "$") }).Count -eq 1
-            if (-not $hasExe -or -not $hasInternal -or -not $hasManual) {
-              Write-Host "ZIP entry paths (first 60):"
-              $entries | Select-Object -First 60 | ForEach-Object { Write-Host $_.FullName }
-              Write-Host "Verification flags: launcher=$hasExe internal=$hasInternal manual=$hasManual"
-              throw "Onedir ZIP verification failed: required launcher, _internal runtime files, or feature manual were not found."
-            }
-          } finally {
-            $archive.Dispose()
-          }
-          Write-Host "Created verified onedir package dist/$zipName"
+          # Smoke-test the frozen GUI executable before publishing the artifact.
+          $process = Start-Process -FilePath (Resolve-Path $exePath).Path -PassThru
+          Start-Sleep -Seconds 8
+          $process.Refresh()
+          if ($process.HasExited) { throw "Application exited during the Windows startup smoke test (exit code $($process.ExitCode))." }
+          Stop-Process -Id $process.Id -Force
+          Write-Host "Windows startup smoke test passed."
           Write-Host "Launcher size: $((Get-Item $exePath).Length) bytes"
-      - name: Upload Windows onedir ZIP
+      - name: Upload Windows onedir application folder
         uses: actions/upload-artifact@v4
         with:
           name: Easy-Save-Audio-Video-v${{ steps.build.outputs.version }}-Windows-x64-Onedir
-          path: dist/Easy_Save_Audio_Video_v${{ steps.build.outputs.version }}_Windows_x64_Onedir.zip
+          path: dist/EasySaveAudioVideo_v${{ steps.build.outputs.version }}/
           if-no-files-found: error
