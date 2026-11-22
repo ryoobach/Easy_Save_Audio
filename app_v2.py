@@ -25,7 +25,8 @@ except ImportError:
     TkinterDnD = None
 
 APP_NAME = "Easy Save Audio & Video"
-APP_VERSION = "2.3.4"
+APP_VERSION = "2.3.5"
+MP3_TEST_PROFILE = "BASELINE"
 APPDATA = Path(os.environ.get("APPDATA", str(Path.home()))) / "EasySaveAudio"
 APPDATA.mkdir(parents=True, exist_ok=True)
 SETTINGS_FILE = APPDATA / "settings.json"
@@ -1135,20 +1136,44 @@ class EasySaveApp:
 
             if cancel.is_set():
                 raise RuntimeError("사용자가 작업을 취소했습니다.")
+            # Four isolated v2.3.5 builds test one compatibility variable at a time.
+            # A_NO_XING: remove the CBR Info/Xing seek header.
+            # B_NO_ID3: remove the ID3v2 tag while retaining the Info header.
+            # C_RESERVOIR_ON: restore the Layer III bit reservoir.
+            # D_JOINT_STEREO: explicitly request joint stereo.
+            profile_options = {
+                "A_NO_XING": ["-write_xing", "0"],
+                "B_NO_ID3": ["-id3v2_version", "0"],
+                "C_RESERVOIR_ON": ["-reservoir", "1"],
+                "D_JOINT_STEREO": ["-joint_stereo", "1"],
+            }
+            encode_options = [
+                "-reservoir", "0", "-b:a", "320k", "-ar", "44100", "-ac", "2",
+                "-write_xing", "1", "-id3v2_version", "3"
+            ]
+            selected_profile = MP3_TEST_PROFILE
+            overrides = profile_options.get(selected_profile, [])
+            for option_index in range(0, len(overrides), 2):
+                option_name, option_value = overrides[option_index:option_index + 2]
+                if option_name in encode_options:
+                    option_position = encode_options.index(option_name)
+                    encode_options[option_position + 1] = option_value
+                else:
+                    encode_options.extend([option_name, option_value])
             encode_command = [
                 self.ffmpeg, "-y", "-hide_banner", "-loglevel", "error",
                 "-i", str(pcm_path), "-map", "0:a:0", "-vn", "-map_metadata", "-1",
                 "-af", "loudnorm=I=-14:TP=-1.0:LRA=11", "-codec:a", "libmp3lame",
-                # Keep the known-good v2.2.8 output profile and disable the Layer III
-                # bit reservoir as a targeted Winamp-compatibility test.
-                "-reservoir", "0", "-b:a", "320k", "-ar", "44100", "-ac", "2",
-                "-write_xing", "1", "-id3v2_version", "3", "-f", "mp3", str(target)
+                *encode_options, "-f", "mp3", str(target)
             ]
             self.log_event(
                 "ffmpeg_encode_started", job_id=job_id, input_file=source,
                 intermediate_file=pcm_path, output_file=target, bitrate="320k",
-                compatibility_profile="pcm_s16le_wav_to_mpeg1_layer3_cbr_320k_no_reservoir_xing_id3v2_3",
-                joint_stereo="libmp3lame_default", bit_reservoir="disabled", xing_header="enabled",
+                compatibility_profile=f"v2.3.5_{selected_profile}",
+                joint_stereo=("forced" if selected_profile == "D_JOINT_STEREO" else "libmp3lame_default"),
+                bit_reservoir=("enabled" if selected_profile == "C_RESERVOIR_ON" else "disabled"),
+                xing_header=("disabled" if selected_profile == "A_NO_XING" else "enabled"),
+                id3v2=("disabled" if selected_profile == "B_NO_ID3" else "3"),
                 source_audio_codec=source_audio.get("codec", "unknown")
             )
             self.emit(job_id, "MP3 인코딩 중", None, None)
