@@ -24,7 +24,7 @@ except ImportError:
     TkinterDnD = None
 
 APP_NAME = "Easy Save Audio & Video"
-APP_VERSION = "2.2.2"
+APP_VERSION = "2.2.3"
 APPDATA = Path(os.environ.get("APPDATA", str(Path.home()))) / "EasySaveAudio"
 APPDATA.mkdir(parents=True, exist_ok=True)
 SETTINGS_FILE = APPDATA / "settings.json"
@@ -229,7 +229,7 @@ class EasySaveApp:
             raise RuntimeError("ffprobe.exe를 찾을 수 없습니다. 앱 패키지에 진단 도구가 포함되어 있는지 확인해 주세요.")
         command = [
             self.ffprobe, "-v", "error", "-select_streams", "a:0",
-            "-show_entries", "stream=codec_name,sample_rate,channels,channel_layout:format=duration",
+            "-show_entries", "stream=codec_name,profile,sample_rate,channels,channel_layout,bit_rate,start_time:format=format_name,duration,bit_rate",
             "-of", "json", str(path)
         ]
         probe = subprocess.run(
@@ -250,6 +250,11 @@ class EasySaveApp:
             "sample_rate": int(stream.get("sample_rate") or 0),
             "channels": int(stream.get("channels") or 0),
             "channel_layout": str(stream.get("channel_layout") or "unknown").lower(),
+            "profile": str(stream.get("profile") or "unknown"),
+            "stream_bit_rate": int(stream.get("bit_rate") or 0),
+            "start_time": str(stream.get("start_time") or "unknown"),
+            "format_name": str(fmt.get("format_name") or "unknown"),
+            "format_bit_rate": int(fmt.get("bit_rate") or 0),
             "duration": str(fmt.get("duration") or "unknown")
         }
 
@@ -278,12 +283,31 @@ class EasySaveApp:
         match = re.search(r"mean_volume:\s*(-?inf|[-+]?\d+(?:\.\d+)?)\s*dB", measured.stderr or "", re.I)
         return match.group(1) if match else "unknown"
 
+    def _analyze_mp3_channels(self, path):
+        # Winamp 무음 사례 비교를 위해 좌우 채널별 통계와 전체 분석 결과를 기록합니다.
+        command = [
+            self.ffmpeg, "-hide_banner", "-i", str(path), "-map", "0:a:0",
+            "-af", "astats=metadata=0:reset=0", "-f", "null", os.devnull
+        ]
+        analyzed = subprocess.run(
+            command, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+            text=True, encoding="utf-8", errors="replace", timeout=900,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0)
+        )
+        output = analyzed.stderr or ""
+        if analyzed.returncode != 0:
+            return f"astats_returncode={analyzed.returncode}; {output[-2000:]}"
+        return output[-4000:] or "astats_output_empty"
+
     def _inspect_mp3_file(self, path):
         result = {
             "path": str(path), "size": path.stat().st_size if path.exists() else 0,
             "codec": "unknown", "sample_rate": 0, "channels": 0,
-            "channel_layout": "unknown", "duration": "unknown",
-            "mean_volume": "unknown", "decode_returncode": -1,
+            "channel_layout": "unknown", "profile": "unknown",
+            "stream_bit_rate": 0, "start_time": "unknown",
+            "format_name": "unknown", "format_bit_rate": 0,
+            "duration": "unknown", "mean_volume": "unknown",
+            "channel_analysis": "not_run", "decode_returncode": -1,
             "probe_error": "", "decode_error": ""
         }
         try:
@@ -298,6 +322,10 @@ class EasySaveApp:
             result["mean_volume"] = self._measure_mp3_volume(path)
         except Exception as exc:
             self.log_event("mp3_volume_measurement_warning", path=path.name, error=str(exc))
+        try:
+            result["channel_analysis"] = self._analyze_mp3_channels(path)
+        except Exception as exc:
+            result["channel_analysis"] = f"analysis_failed: {exc}"
         result["passed"] = (
             not result["probe_error"] and result["codec"] == "mp3"
             and result["sample_rate"] == 44100 and result["channels"] == 2
@@ -832,7 +860,14 @@ class EasySaveApp:
             "job_id": job_id, "size": inspection["size"],
             "duration": inspection["duration"], "codec": inspection["codec"],
             "sample_rate": inspection["sample_rate"], "channels": inspection["channels"],
-            "channel_layout": inspection["channel_layout"], "mean_volume": inspection["mean_volume"],
+            "channel_layout": inspection["channel_layout"],
+            "profile": inspection["profile"],
+            "stream_bit_rate": inspection["stream_bit_rate"],
+            "start_time": inspection["start_time"],
+            "format_name": inspection["format_name"],
+            "format_bit_rate": inspection["format_bit_rate"],
+            "mean_volume": inspection["mean_volume"],
+            "channel_analysis": inspection["channel_analysis"],
             "decode_returncode": inspection["decode_returncode"],
             "validation_reasons": validation_reasons,
             "probe_error": inspection["probe_error"], "decode_error": inspection["decode_error"]
