@@ -25,7 +25,7 @@ except ImportError:
     TkinterDnD = None
 
 APP_NAME = "Easy Save Audio & Video"
-APP_VERSION = "2.3.0"
+APP_VERSION = "2.3.1"
 APPDATA = Path(os.environ.get("APPDATA", str(Path.home()))) / "EasySaveAudio"
 APPDATA.mkdir(parents=True, exist_ok=True)
 SETTINGS_FILE = APPDATA / "settings.json"
@@ -272,6 +272,88 @@ class EasySaveApp:
             "duration": str(fmt.get("duration") or "unknown")
         }
 
+    def _scan_mp3_frames(self, path):
+        """Walk MPEG audio frames sequentially and report gaps/truncation."""
+        result = {
+            "scan_status": "not_started", "frame_count": 0,
+            "first_frame_offset": -1, "last_frame_offset": -1,
+            "audio_bytes_scanned": 0, "gap_count": 0,
+            "gap_bytes": 0, "truncated_frame": False,
+            "trailing_bytes": 0, "bitrate_kbps": {},
+            "sample_rates": {}, "mpeg_versions": {}
+        }
+        try:
+            data = path.read_bytes()
+            size = len(data)
+            offset = 0
+            if data[:3] == b"ID3" and len(data) >= 10:
+                b = data[6:10]
+                if all((x & 0x80) == 0 for x in b):
+                    offset = 10 + ((b[0] & 127) << 21) + ((b[1] & 127) << 14) + ((b[2] & 127) << 7) + (b[3] & 127)
+                    if data[5] & 0x10:
+                        offset += 10
+            bitrate_tables = {
+                (3, 1): [0, 32, 40, 48, 56, 64, 80, 96, 112, 128, 160, 192, 224, 256, 320, 0],
+                (2, 1): [0, 8, 16, 24, 32, 40, 48, 56, 64, 80, 96, 112, 128, 144, 160, 0],
+                (0, 1): [0, 8, 16, 24, 32, 40, 48, 56, 64, 80, 96, 112, 128, 144, 160, 0]
+            }
+            base_rates = {3: [44100, 48000, 32000], 2: [22050, 24000, 16000], 0: [11025, 12000, 8000]}
+            while offset + 4 <= size:
+                word = int.from_bytes(data[offset:offset + 4], "big")
+                valid_sync = (word & 0xFFE00000) == 0xFFE00000
+                version = (word >> 19) & 3
+                layer = (word >> 17) & 3
+                bitrate_index = (word >> 12) & 15
+                rate_index = (word >> 10) & 3
+                valid = valid_sync and version != 1 and layer == 1 and bitrate_index not in (0, 15) and rate_index != 3
+                if not valid:
+                    if data[offset:offset + 3] in (b"TAG", b"APET"):
+                        break
+                    search_end = min(size - 3, offset + 2048)
+                    found = -1
+                    for candidate_offset in range(offset + 1, search_end):
+                        candidate = int.from_bytes(data[candidate_offset:candidate_offset + 4], "big")
+                        if (candidate & 0xFFE00000) == 0xFFE00000:
+                            cv, cl, cb, cs = (candidate >> 19) & 3, (candidate >> 17) & 3, (candidate >> 12) & 15, (candidate >> 10) & 3
+                            if cv != 1 and cl == 1 and cb not in (0, 15) and cs != 3:
+                                found = candidate_offset
+                                break
+                    if found < 0:
+                        result["trailing_bytes"] = size - offset
+                        break
+                    result["gap_count"] += 1
+                    result["gap_bytes"] += found - offset
+                    offset = found
+                    continue
+                bitrate = bitrate_tables[(version, layer)][bitrate_index]
+                sample_rate = base_rates[version][rate_index]
+                if not bitrate or not sample_rate:
+                    result["scan_status"] = "invalid_header"
+                    break
+                padding = (word >> 9) & 1
+                frame_length = ((144000 if version == 3 else 72000) * bitrate) // sample_rate + padding
+                if offset + frame_length > size:
+                    result["truncated_frame"] = True
+                    result["trailing_bytes"] = size - offset
+                    break
+                if result["first_frame_offset"] < 0:
+                    result["first_frame_offset"] = offset
+                result["last_frame_offset"] = offset
+                result["frame_count"] += 1
+                result["audio_bytes_scanned"] += frame_length
+                result["bitrate_kbps"][str(bitrate)] = result["bitrate_kbps"].get(str(bitrate), 0) + 1
+                result["sample_rates"][str(sample_rate)] = result["sample_rates"].get(str(sample_rate), 0) + 1
+                version_name = {3: "MPEG1", 2: "MPEG2", 0: "MPEG2.5"}[version]
+                result["mpeg_versions"][version_name] = result["mpeg_versions"].get(version_name, 0) + 1
+                offset += frame_length
+            if result["scan_status"] == "not_started":
+                result["scan_status"] = "complete" if result["frame_count"] else "no_frames_found"
+            return result
+        except Exception as exc:
+            result["scan_status"] = "error"
+            result["scan_error"] = str(exc)
+            return result
+
     def _inspect_mp3_frame_header(self, path):
         """Inspect opening MP3 bytes for MPEG frame and Xing/Info header details."""
         result = {
@@ -412,6 +494,11 @@ class EasySaveApp:
         }
         try:
             result["frame_header_analysis"] = self._inspect_mp3_frame_header(path)
+            result["frame_header_analysis"]["full_frame_scan"] = self._scan_mp3_frames(path)
+            scan = result["frame_header_analysis"]["full_frame_scan"]
+            xing_frames = result["frame_header_analysis"].get("xing_frame_count")
+            if xing_frames is not None:
+                scan["xing_frame_count_matches"] = (xing_frames == scan.get("frame_count"))
             self.log_event("mp3_frame_header_analysis", path=path.name, **result["frame_header_analysis"])
         except Exception as exc:
             result["frame_header_analysis"] = {"inspection_error": str(exc)}
@@ -1006,17 +1093,17 @@ class EasySaveApp:
                 self.ffmpeg, "-y", "-hide_banner", "-loglevel", "error",
                 "-i", str(pcm_path), "-map", "0:a:0", "-vn", "-map_metadata", "-1",
                 "-af", "loudnorm=I=-14:TP=-1.0:LRA=11", "-codec:a", "libmp3lame",
-                # Compatibility-first profile for older Winamp decoders:
-                # MPEG-1 Layer III, CBR 192 kbps, 44.1 kHz stereo, no Xing/Info
-                # seek frame, and ID3v2.3 metadata.
-                "-b:a", "192k", "-ar", "44100", "-ac", "2",
-                "-write_xing", "0", "-id3v2_version", "3", "-f", "mp3", str(target)
+                # Restore the known-good v2.2.8 baseline: MPEG-1 Layer III,
+                # CBR 320 kbps, 44.1 kHz stereo, standard Xing/Info duration index,
+                # and ID3v2.3. The 192 kbps/no-Xing experiment was inconclusive.
+                "-b:a", "320k", "-ar", "44100", "-ac", "2",
+                "-write_xing", "1", "-id3v2_version", "3", "-f", "mp3", str(target)
             ]
             self.log_event(
                 "ffmpeg_encode_started", job_id=job_id, input_file=source,
-                intermediate_file=pcm_path, output_file=target, bitrate="192k",
-                compatibility_profile="pcm_s16le_wav_to_mpeg1_layer3_cbr_192k_no_xing_id3v2_3",
-                joint_stereo="libmp3lame_default", xing_header="disabled",
+                intermediate_file=pcm_path, output_file=target, bitrate="320k",
+                compatibility_profile="pcm_s16le_wav_to_mpeg1_layer3_cbr_320k_xing_id3v2_3",
+                joint_stereo="libmp3lame_default", xing_header="enabled",
                 source_audio_codec=source_audio.get("codec", "unknown")
             )
             self.emit(job_id, "MP3 인코딩 중", None, None)
