@@ -1142,9 +1142,9 @@ class EasySaveApp:
 
             if cancel.is_set():
                 raise RuntimeError("사용자가 작업을 취소했습니다.")
-            # v2.3.6 isolates four remaining compatibility variables after A-D failed.
-            # E: lower CBR bitrate; F: use LAME VBR quality 2; G: encode at 48 kHz;
-            # H: bypass loudnorm while retaining the same PCM source and MP3 settings.
+            # v2.3.6 isolates Winamp compatibility variables across five build profiles.
+            # E: 192 kbps CBR; F: LAME VBR quality 2; G: 48 kHz output;
+            # H: disable loudnorm; I: enable bit reservoir and omit Xing/Info header.
             encode_options = [
                 "-reservoir", "0", "-b:a", "320k", "-ar", str(pcm_sample_rate), "-ac", "2",
                 "-write_xing", "1", "-id3v2_version", "3"
@@ -1158,6 +1158,11 @@ class EasySaveApp:
                 del encode_options[bitrate_index:bitrate_index + 2]
                 encode_options.extend(["-q:a", "2"])
                 bitrate_label = "VBR quality 2"
+            elif selected_profile == "I_RESERVOIR_NO_XING":
+                encode_options.remove("-reservoir")
+                encode_options.remove("0")
+                xing_index = encode_options.index("-write_xing")
+                encode_options[xing_index + 1] = "0"
             audio_filter_options = (
                 [] if selected_profile == "H_NO_LOUDNORM"
                 else ["-af", "loudnorm=I=-14:TP=-1.0:LRA=11"]
