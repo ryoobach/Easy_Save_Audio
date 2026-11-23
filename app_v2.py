@@ -25,7 +25,7 @@ except ImportError:
     TkinterDnD = None
 
 APP_NAME = "Easy Save Audio & Video"
-APP_VERSION = "2.3.8"
+APP_VERSION = "2.3.9"
 MP3_TEST_PROFILE = "BASELINE"
 APPDATA = Path(os.environ.get("APPDATA", str(Path.home()))) / "EasySaveAudio"
 APPDATA.mkdir(parents=True, exist_ok=True)
@@ -119,17 +119,17 @@ class EasySaveApp:
         self.logger = logging.getLogger("EasySaveAudio")
         self.logger.setLevel(logging.INFO)
         self.logger.handlers.clear()
-        # Start each application session with a fresh diagnostic log.
-        handler = logging.FileHandler(DIAGNOSTIC_LOG, mode="w", encoding="utf-8", delay=False)
+        # Keep diagnostic history across application restarts; no rotation or size cap.
+        handler = logging.FileHandler(DIAGNOSTIC_LOG, mode="a", encoding="utf-8", delay=False)
         handler.setFormatter(logging.Formatter("%(asctime)s | %(levelname)s | %(message)s"))
         self.logger.addHandler(handler)
         self.logger.propagate = False
         self.logger.info("app_started version=%s platform=windows", APP_VERSION)
         try:
             self.logger.info("diagnostic_log_storage %s", json.dumps({
-                "startup_reset": True, "append_mode_within_session": True,
+                "startup_reset": False, "append_mode_across_sessions": True,
                 "rotation_enabled": False, "size_limit_bytes": None,
-                "existing_size_bytes_after_startup": 0
+                "existing_size_bytes_preserved": DIAGNOSTIC_LOG.stat().st_size
             }))
             for active_handler in self.logger.handlers:
                 active_handler.flush()

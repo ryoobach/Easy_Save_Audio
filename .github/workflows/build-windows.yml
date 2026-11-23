@@ -30,7 +30,7 @@ jobs:
           $versionMatch = Select-String -Path app_v2.py -Pattern '^APP_VERSION = "([^"]+)"'
           if (-not $versionMatch) { throw "APP_VERSION was not found in app_v2.py" }
           $version = $versionMatch.Matches[0].Groups[1].Value
-          if ($version -ne "2.3.8") { throw "Expected version 2.3.8, found $version" }
+          if ($version -ne "2.3.9") { throw "Expected version 2.3.9, found $version" }
           $baseSource = Get-Content app_v2.py -Raw
           $ffmpeg = python -c "import imageio_ffmpeg; print(imageio_ffmpeg.get_ffmpeg_exe())"
           $lameZip = Join-Path $env:RUNNER_TEMP "lame-4.0-win64.zip"
@@ -76,7 +76,7 @@ jobs:
               $sharedRuntimeCopied = $true
             }
           }
-          Copy-Item "Easy_Save_Audio_Video_기능설명서_v2.3.8.md" -Destination $package
+          Copy-Item "docs/releases/Easy_Save_Audio_Video_기능설명서_v2.3.9.md" -Destination $package
           $exeFiles = Get-ChildItem $package -Filter "EasySave_*.exe"
           if ($exeFiles.Count -ne 10) { throw "Expected 10 EXE files, found $($exeFiles.Count)" }
           if (-not (Test-Path (Join-Path $package "_internal"))) { throw "Shared _internal runtime folder is missing." }
@@ -95,6 +95,6 @@ jobs:
       - name: Upload single shared application folder
         uses: actions/upload-artifact@v4
         with:
-          name: Easy-Save-Audio-Video-v2.3.8-Winamp10-LAME-Windows-x64
-          path: dist/EasySaveAudioVideo_v2.3.8-Winamp10-LAME/
+          name: Easy-Save-Audio-Video-v2.3.9-Winamp10-LAME-Windows-x64
+          path: dist/EasySaveAudioVideo_v2.3.9-Winamp10-LAME/
           if-no-files-found: error
